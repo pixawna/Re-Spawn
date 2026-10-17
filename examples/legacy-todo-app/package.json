@@ -1,0 +1,18 @@
+{
+  "name": "legacy-todo-app",
+  "version": "1.3.0",
+  "description": "A tiny to-do app last touched in 2020. Built with webpack 4. It does not build on modern Node.js.",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "build": "webpack --mode production && node scripts/copy-html.js",
+    "test": "node test/todos.test.js"
+  },
+  "engines": {
+    "node": ">=10 <17"
+  },
+  "devDependencies": {
+    "webpack": "4.46.0",
+    "webpack-cli": "3.3.12"
+  }
+}

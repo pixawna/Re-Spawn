@@ -1,0 +1,11 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "127.0.0.1:6379:6379"   # graph (local only: no auth in dev)
+      - "127.0.0.1:3001:3000"   # FalkorDB browser
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+
+volumes:
+  falkordb-data:

@@ -1,4 +1,5 @@
-import Workspace from "@/components/Workspace";
+import ReSpawn from "@/components/ReSpawn";
+
 export default function Home() {
-  return <Workspace />;
+  return <ReSpawn />;
 }

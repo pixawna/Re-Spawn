@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# re:spawn backend
+__pycache__/
+*.pyc
+.venv/
+backend/.respawn/
