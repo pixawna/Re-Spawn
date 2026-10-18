@@ -4,9 +4,11 @@ Every Cypher statement the agent runs goes through `run()`, which times it and
 forwards it to the active listener (the live run's event stream). That is how the
 UI can show exactly which graph queries led to each decision.
 """
+
 from __future__ import annotations
 
 import contextvars
+from contextlib import contextmanager
 import os
 import threading
 import time
@@ -24,7 +26,22 @@ _detail = ""
 
 # Listener receives (cypher, params, rows, elapsed_ms, tag).
 QueryListener = Callable[[str, dict, int, float, str], None]
-_listener: contextvars.ContextVar[Optional[QueryListener]] = contextvars.ContextVar("listener", default=None)
+_listener: contextvars.ContextVar[Optional[QueryListener]] = contextvars.ContextVar(
+    "listener", default=None
+)
+
+
+_captures = contextvars.ContextVar("captures", default=())
+
+
+@contextmanager
+def capture_queries():
+    evidence = []
+    token = _captures.set((*_captures.get(), evidence))
+    try:
+        yield evidence
+    finally:
+        _captures.reset(token)
 
 
 def set_listener(fn: Optional[QueryListener]):
@@ -57,7 +74,9 @@ def connect():
                 return _graph
             except Exception as exc:  # noqa: BLE001
                 if want == "server":
-                    raise RuntimeError(f"Could not reach FalkorDB at {host}:{port}: {exc}") from exc
+                    raise RuntimeError(
+                        f"Could not reach FalkorDB at {host}:{port}: {exc}"
+                    ) from exc
 
         try:
             from redislite.falkordb_client import FalkorDB as EmbeddedFalkorDB
@@ -68,7 +87,11 @@ def connect():
             ) from exc
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         db = EmbeddedFalkorDB(str(DATA_DIR / "falkordb.rdb"))
-        _graph, _mode, _detail = db.select_graph(GRAPH_NAME), "embedded", "FalkorDB Lite (embedded)"
+        _graph, _mode, _detail = (
+            db.select_graph(GRAPH_NAME),
+            "embedded",
+            "FalkorDB Lite (embedded)",
+        )
         return _graph
 
 
@@ -93,7 +116,9 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def run(cypher: str, params: Optional[dict] = None, tag: str = "", quiet: bool = False) -> list[dict]:
+def run(
+    cypher: str, params: Optional[dict] = None, tag: str = "", quiet: bool = False
+) -> list[dict]:
     """Run a query and return rows as dicts keyed by column alias."""
     g = connect()
     params = params or {}
@@ -102,8 +127,31 @@ def run(cypher: str, params: Optional[dict] = None, tag: str = "", quiet: bool =
         res = g.query(cypher, params)
     elapsed = (time.perf_counter() - started) * 1000
     header = [h[1] if isinstance(h, (list, tuple)) else h for h in (res.header or [])]
-    rows = [{header[i]: _plain(v) for i, v in enumerate(r)} for r in (res.result_set or [])]
+    rows = [
+        {header[i]: _plain(v) for i, v in enumerate(r)} for r in (res.result_set or [])
+    ]
+    for evidence in _captures.get():
+        evidence.append(
+            {
+                "query": " ".join(cypher.split()),
+                "params": params,
+                "result": rows[:20],
+                "row_count": len(rows),
+                "tag": tag,
+            }
+        )
     listener = _listener.get()
     if listener and not quiet:
         listener(" ".join(cypher.split()), params, len(rows), elapsed, tag)
     return rows
+
+
+def read_only(cypher: str, params: dict) -> list[dict]:
+    """GRAPH.RO_QUERY enforces read-only execution at the database boundary."""
+    with _lock:
+        result = connect().ro_query(cypher, params, timeout=2000)
+    header = [h[1] if isinstance(h, (list, tuple)) else h for h in result.header]
+    return [
+        {header[i]: _plain(v) for i, v in enumerate(row)}
+        for row in result.result_set[:30]
+    ]

@@ -1,0 +1,14 @@
+{
+  "name": "legacy-kanban-app",
+  "version": "1.0.0",
+  "description": "An independent kanban board stranded on webpack 4. Reuses graph knowledge learned from the to-do project.",
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production && node scripts/copy-html.js",
+    "test": "node --test --test-reporter=tap test/board.test.js"
+  },
+  "devDependencies": {
+    "webpack": "4.46.0",
+    "webpack-cli": "3.3.12"
+  }
+}

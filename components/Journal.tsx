@@ -8,7 +8,15 @@ type Tab = "story" | "cypher" | "terminal";
 
 type Item =
   | { kind: "say"; seq: number; text: string; mood: Mood }
-  | { kind: "tool"; seq: number; tool: string; description: string; result?: unknown; queries: RunEvent[]; done: boolean }
+  | {
+      kind: "tool";
+      seq: number;
+      tool: string;
+      description: string;
+      result?: unknown;
+      queries: RunEvent[];
+      done: boolean;
+    }
   | { kind: "event"; seq: number; ev: RunEvent };
 
 const PHASES = [
@@ -20,20 +28,51 @@ const PHASES = [
 
 function buildStory(events: RunEvent[]): Item[] {
   const items: Item[] = [];
-  let open: Extract<Item, { kind: "tool" }> | null = null;
+  const stack: Extract<Item, { kind: "tool" }>[] = [];
   for (const ev of events) {
-    if (ev.type === "say") items.push({ kind: "say", seq: ev.seq, text: String(ev.text), mood: (ev.mood as Mood) || "neutral" });
+    if (ev.type === "say" || ev.type === "decision")
+      items.push({
+        kind: "say",
+        seq: ev.seq,
+        text: String(ev.text),
+        mood: (ev.mood as Mood) || "neutral",
+      });
     else if (ev.type === "tool" && ev.status === "start") {
-      open = { kind: "tool", seq: ev.seq, tool: String(ev.tool), description: String(ev.description), queries: [], done: false };
-      items.push(open);
+      const tool: Extract<Item, { kind: "tool" }> = {
+        kind: "tool",
+        seq: ev.seq,
+        tool: String(ev.tool),
+        description: String(ev.description),
+        queries: [],
+        done: false,
+      };
+      stack.push(tool);
+      items.push(tool);
     } else if (ev.type === "tool" && ev.status === "done") {
-      if (open) {
-        open.result = ev.result;
-        open.done = true;
+      const index = stack.map((t) => t.tool).lastIndexOf(String(ev.tool));
+      if (index >= 0) {
+        const tool = stack[index];
+        tool.result = ev.result;
+        tool.done = true;
+        stack.splice(index, 1);
       }
-      open = null;
-    } else if (ev.type === "cypher" && open) open.queries.push(ev);
-    else if (["diagnosis", "plans", "attempt", "learned", "patch", "verify", "error"].includes(ev.type))
+    } else if (ev.type === "cypher" && stack.length)
+      stack[stack.length - 1].queries.push(ev);
+    else if (
+      [
+        "diagnosis",
+        "plans",
+        "attempt",
+        "learned",
+        "patch",
+        "verify",
+        "error",
+        "agent_mode",
+        "agent_fallback",
+        "dependencies",
+        "shared_learning",
+      ].includes(ev.type)
+    )
       items.push({ kind: "event", seq: ev.seq, ev });
   }
   return items;
@@ -45,16 +84,26 @@ function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
   let summary = "";
   if (Array.isArray(r)) summary = r.join(", ") || "nothing found";
   else if (r && typeof r === "object") {
-    if ("chosen" in r) summary = r.chosen ? `best route: ${(r.chosen as string[]).join(" + ")}` : "no feasible route";
+    if ("chosen" in r)
+      summary = r.chosen
+        ? `best route: ${Array.isArray(r.chosen) ? r.chosen.join(" + ") : ((r.chosen as Plan).titles ?? []).join(" → ")}`
+        : "no feasible route";
     else if ("learned" in r) summary = `${r.a} conflicts with ${r.b}`;
     else if ("attempt" in r) summary = `${r.outcome} · ${r.attempt}`;
     else summary = JSON.stringify(r).slice(0, 120);
   }
   return (
     <div className={`j-tool ${item.done ? "" : "is-live"}`}>
-      <button className="j-tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button
+        className="j-tool-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
         <span className="j-fn">{item.tool}()</span>
-        <span className="j-q">{item.queries.length} {item.queries.length === 1 ? "query" : "queries"}</span>
+        <span className="j-q">
+          {item.queries.length}{" "}
+          {item.queries.length === 1 ? "query" : "queries"}
+        </span>
       </button>
       <p className="j-sum">{item.done ? summary : item.description}</p>
       {open && (
@@ -79,7 +128,12 @@ function PlanList({ plans, chosen }: { plans: Plan[]; chosen: string | null }) {
       <p className="j-label">Routes FalkorDB found</p>
       <ol>
         {plans.map((p) => (
-          <li key={p.id} className={p.id === chosen ? "is-chosen" : p.feasible ? "" : "is-out"}>
+          <li
+            key={p.id}
+            className={
+              p.id === chosen ? "is-chosen" : p.feasible ? "" : "is-out"
+            }
+          >
             <span className="j-route">{p.titles.join(" → ")}</span>
             <span className="j-cost">{p.cost}</span>
             {!p.feasible && <small>{p.reasons.join("; ")}</small>}
@@ -93,13 +147,46 @@ function PlanList({ plans, chosen }: { plans: Plan[]; chosen: string | null }) {
 function EventCard({ ev }: { ev: RunEvent }) {
   const [showDiff, setShowDiff] = useState(false);
   switch (ev.type) {
+    case "agent_mode":
+      return (
+        <div className="j-card">
+          Controller: {String(ev.mode)}
+          {ev.model ? ` · ${ev.model} · MCP tools` : ""}
+        </div>
+      );
+    case "agent_fallback":
+      return <div className="j-card">{String(ev.message)}</div>;
+    case "dependencies":
+      return (
+        <div className="j-card">
+          {ev.imported
+            ? `Imported ${ev.packages} resolved packages and ${ev.edges} dependency edges into FalkorDB.`
+            : String(ev.reason)}
+        </div>
+      );
+    case "shared_learning":
+      return (
+        <div className="j-card learn">
+          Known from a past resurrection:{" "}
+          <strong>{String(ev.source_project)}</strong>
+          <p>{String(ev.reason)}</p>
+        </div>
+      );
     case "diagnosis": {
-      if (ev.alive) return <div className="j-card ok">The original build passes. Nothing to repair.</div>;
+      if (ev.alive)
+        return (
+          <div className="j-card ok">
+            The original build passes. Nothing to repair.
+          </div>
+        );
       const err = ev.error as { summary: string; match: string };
       return (
         <div className="j-card bad">
           <p>
-            <strong>{ev.step === "install" ? "npm install" : "npm run build"} failed</strong> with exit code {String(ev.code)}.
+            <strong>
+              {ev.step === "install" ? "npm install" : "npm run build"} failed
+            </strong>{" "}
+            with exit code {String(ev.code)}.
           </p>
           <pre>{String(ev.excerpt)}</pre>
           <small>Matched graph signature: {err.match || "none"}</small>
@@ -107,26 +194,43 @@ function EventCard({ ev }: { ev: RunEvent }) {
       );
     }
     case "plans":
-      return <PlanList plans={ev.plans as Plan[]} chosen={(ev.chosen as string) || null} />;
+      return (
+        <PlanList
+          plans={ev.plans as Plan[]}
+          chosen={(ev.chosen as string) || null}
+        />
+      );
     case "attempt": {
       const titles = (ev.titles as string[]) || (ev.steps as string[]);
       if (ev.status === "running")
         return (
           <div className="j-card live">
-            <strong>Route {String(ev.n)}</strong> in a fresh sandbox: {titles?.join(" → ")}
+            <strong>Route {String(ev.n)}</strong> in a fresh sandbox:{" "}
+            {titles?.join(" → ")}
           </div>
         );
       if (ev.status === "success")
         return (
           <div className="j-card ok">
-            <strong>Route {String(ev.n)} worked.</strong> Install, build and tests passed.
+            <strong>Route {String(ev.n)} worked.</strong> Install, build and
+            tests passed.
+          </div>
+        );
+      if (ev.status === "build-passing")
+        return (
+          <div className="j-card">
+            <strong>Route {String(ev.n)} builds.</strong> Verification is
+            incomplete. Check the test and smoke evidence below.
           </div>
         );
       const err = ev.error as { summary: string };
       return (
         <div className="j-card bad">
           <p>
-            <strong>Route {String(ev.n)} failed at {String(ev.stage)}.</strong> {err?.summary}
+            <strong>
+              Route {String(ev.n)} failed at {String(ev.stage)}.
+            </strong>{" "}
+            {err?.summary}
           </p>
           <pre>{String(ev.excerpt)}</pre>
         </div>
@@ -144,7 +248,11 @@ function EventCard({ ev }: { ev: RunEvent }) {
     case "patch":
       return (
         <div className="j-card">
-          <button className="j-link" onClick={() => setShowDiff((s) => !s)} aria-expanded={showDiff}>
+          <button
+            className="j-link"
+            onClick={() => setShowDiff((s) => !s)}
+            aria-expanded={showDiff}
+          >
             {showDiff ? "Hide" : "Show"} the change for route {String(ev.n)}
           </button>
           {showDiff && <pre className="diff">{String(ev.diff)}</pre>}
@@ -160,21 +268,37 @@ function EventCard({ ev }: { ev: RunEvent }) {
       return (
         <div className={`j-card ${ev.ok ? "ok" : "bad"}`}>
           HTTP smoke check:{" "}
-          {((ev.checks as { url: string; status: number }[]) || []).map((c) => `${c.url} ${c.status}`).join(", ") ||
-            String(ev.error)}
+          {((ev.checks as { url: string; status: number }[]) || [])
+            .map((c) => `${c.url} ${c.status}`)
+            .join(", ") || String(ev.error)}
         </div>
       );
     case "error":
-      return <div className="j-card bad">The agent crashed: {String(ev.message)}</div>;
+      return (
+        <div className="j-card bad">
+          The agent crashed: {String(ev.message)}
+        </div>
+      );
   }
   return null;
 }
 
-export default function Journal({ events, phase, done }: { events: RunEvent[]; phase: string | null; done: boolean }) {
+export default function Journal({
+  events,
+  phase,
+  done,
+}: {
+  events: RunEvent[];
+  phase: string | null;
+  done: boolean;
+}) {
   const [tab, setTab] = useState<Tab>("story");
   const scroller = useRef<HTMLDivElement>(null);
   const story = useMemo(() => buildStory(events), [events]);
-  const cypher = useMemo(() => events.filter((e) => e.type === "cypher"), [events]);
+  const cypher = useMemo(
+    () => events.filter((e) => e.type === "cypher"),
+    [events],
+  );
   const logs = useMemo(() => events.filter((e) => e.type === "log"), [events]);
   const phaseIdx = PHASES.findIndex((p) => p.id === phase);
 
@@ -187,7 +311,16 @@ export default function Journal({ events, phase, done }: { events: RunEvent[]; p
     <section className="journal" aria-label="What the agent is doing">
       <ol className="phases" aria-label="Progress">
         {PHASES.map((p, i) => (
-          <li key={p.id} className={i < phaseIdx || (done && i <= phaseIdx) ? "is-done" : i === phaseIdx ? "is-now" : ""}>
+          <li
+            key={p.id}
+            className={
+              i < phaseIdx || (done && i <= phaseIdx)
+                ? "is-done"
+                : i === phaseIdx
+                  ? "is-now"
+                  : ""
+            }
+          >
             {p.label}
           </li>
         ))}
@@ -200,7 +333,13 @@ export default function Journal({ events, phase, done }: { events: RunEvent[]; p
             ["terminal", `Terminal (${logs.length})`],
           ] as [Tab, string][]
         ).map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "is-on" : ""} onClick={() => setTab(id)}>
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? "is-on" : ""}
+            onClick={() => setTab(id)}
+          >
             {label}
           </button>
         ))}
@@ -208,7 +347,8 @@ export default function Journal({ events, phase, done }: { events: RunEvent[]; p
       <div className="journal-body" ref={scroller}>
         {events.length === 0 && (
           <p className="j-empty">
-            Press <strong>Resurrect</strong> and Mori will install the original dependencies, read the failure, and ask FalkorDB for a way back.
+            Press <strong>Resurrect</strong> and Mori will install the original
+            dependencies, read the failure, and ask FalkorDB for a way back.
           </p>
         )}
         {tab === "story" &&
@@ -237,7 +377,10 @@ export default function Journal({ events, phase, done }: { events: RunEvent[]; p
         {tab === "terminal" && (
           <pre className="j-term">
             {logs.map((l) => (
-              <span key={l.seq} className={`t-${String(l.stream)} ${/ERR|error|ERESOLVE/.test(String(l.line)) ? "t-red" : ""}`}>
+              <span
+                key={l.seq}
+                className={`t-${String(l.stream)} ${/ERR|error|ERESOLVE/.test(String(l.line)) ? "t-red" : ""}`}
+              >
                 {String(l.line)}
                 {"\n"}
               </span>

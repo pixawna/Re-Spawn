@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Second Chance Board</title
+  ><style>
+    body {
+      font: 16px system-ui;
+      background: #f2f0e5;
+      color: #334536;
+      margin: 0;
+      padding: 35px;
+    }
+    h1 {
+      font: 38px Georgia;
+      margin: 8px 0;
+    }
+    p {
+      color: #7a826e;
+    }
+    form {
+      display: flex;
+      gap: 10px;
+      margin: 25px 0;
+    }
+    input,
+    button {
+      font: inherit;
+      padding: 12px;
+      border: 1px solid #c5ccba;
+      border-radius: 7px;
+    }
+    input {
+      min-width: 0;
+      flex: 1;
+    }
+    button {
+      cursor: pointer;
+      background: #dceacb;
+      color: #334536;
+    }
+    #board {
+      display: flex;
+      gap: 15px;
+    }
+    section {
+      background: #e8e8dc;
+      border-radius: 10px;
+      padding: 16px;
+      flex: 1;
+    }
+    h2 {
+      font-size: 14px;
+    }
+    section button {
+      display: block;
+      margin: 12px 0;
+      width: 100%;
+      text-align: left;
+      background: #fffef7;
+    }
+    @media (max-width: 500px) {
+      #board {
+        flex-direction: column;
+      }
+      body {
+        padding: 18px;
+      }
+    }
+  </style>
+  <p>SECOND CHANCE STUDIO</p>
+  <h1>Old board. New possibilities.</h1>
+  <p>Click a card to move it to the next column.</p>
+  <form>
+    <input aria-label="New card" placeholder="What’s next?" required /><button>
+      Add
+    </button>
+  </form>
+  <div id="board"></div>
+  __BUNDLE__
+</html>

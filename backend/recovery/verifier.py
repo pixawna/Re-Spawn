@@ -1,4 +1,5 @@
 """Failure classification and post-repair verification (tests + real HTTP smoke check)."""
+
 from __future__ import annotations
 
 import functools
@@ -17,42 +18,78 @@ def classify(output: str, signatures: list[dict]) -> dict:
     INCOMPATIBLE_WITH edges, so the graph also drives diagnosis."""
     for sig in signatures:
         if sig.get("signature") and re.search(sig["signature"], output):
-            return {"class": "runtime_incompatibility", "package": sig["package"], "runtime": sig.get("runtime"),
-                    "summary": sig["reason"], "match": re.search(sig["signature"], output).group(0)}
+            return {
+                "class": "runtime_incompatibility",
+                "package": sig["package"],
+                "runtime": sig.get("runtime"),
+                "summary": sig["reason"],
+                "match": re.search(sig["signature"], output).group(0),
+            }
     if "ERESOLVE" in output:
         # npm: 'peer webpack@"4.x.x" from webpack-cli@3.3.12' and 'Found: webpack@5.112.0'
-        peer = re.search(r'peer ([@\w./-]+)@"([^"]+)" from ([@\w./-]+)@(\d[\w.-]*)', output)
+        peer = re.search(
+            r'peer ([@\w./-]+)@"([^"]+)" from ([@\w./-]+)@(\d[\w.-]*)', output
+        )
         found = re.search(r"Found: ([@\w./-]+)@(\d[\w.-]*)", output)
         if peer:
             wanted_pkg, wanted_range, owner, owner_ver = peer.groups()
-            found_major = major_of(found.group(2)) if found and found.group(1) == wanted_pkg else None
+            found_major = (
+                major_of(found.group(2))
+                if found and found.group(1) == wanted_pkg
+                else None
+            )
             return {
                 "class": "peer_conflict",
                 "summary": f"{owner}@{owner_ver} needs {wanted_pkg}@{wanted_range}"
-                           + (f", but the plan installs {wanted_pkg}@{found_major}" if found_major else ""),
+                + (
+                    f", but the plan installs {wanted_pkg}@{found_major}"
+                    if found_major
+                    else ""
+                ),
                 "owner": f"{owner}@{major_of(owner_ver)}",
-                "target": f"{wanted_pkg}@{found_major}" if found_major is not None else None,
+                "target": f"{wanted_pkg}@{found_major}"
+                if found_major is not None
+                else None,
                 "match": peer.group(0),
             }
-        return {"class": "peer_conflict", "summary": "npm could not resolve the dependency tree", "match": "ERESOLVE"}
+        return {
+            "class": "peer_conflict",
+            "summary": "npm could not resolve the dependency tree",
+            "match": "ERESOLVE",
+        }
     if "ETARGET" in output or "notarget" in output:
-        return {"class": "missing_version", "summary": "A requested package version does not exist", "match": "ETARGET"}
+        return {
+            "class": "missing_version",
+            "summary": "A requested package version does not exist",
+            "match": "ETARGET",
+        }
     if re.search(r"ENOTFOUND|ECONNREFUSED|EAI_AGAIN|network", output):
-        return {"class": "network", "summary": "The registry could not be reached", "match": "network"}
+        return {
+            "class": "network",
+            "summary": "The registry could not be reached",
+            "match": "network",
+        }
     if re.search(r"Module not found|Cannot find module", output):
         m = re.search(r"(Module not found[^\n]*|Cannot find module[^\n]*)", output)
-        return {"class": "missing_module", "summary": m.group(0)[:200] if m else "Missing module", "match": "module"}
+        return {
+            "class": "missing_module",
+            "summary": m.group(0)[:200] if m else "Missing module",
+            "match": "module",
+        }
     tail = [line for line in output.splitlines() if line.strip()][-1:] or ["unknown"]
     return {"class": "unknown", "summary": tail[0][:200], "match": ""}
 
 
 def count_tests(output: str) -> dict:
     passed = failed = 0
-    for pat_p, pat_f in ((r"(\d+) passing", r"(\d+) failing"),
-                         (r"Tests:\s+(?:\d+ failed, )?(\d+) passed", r"Tests:\s+(\d+) failed"),
-                         (r"# pass (\d+)", r"# fail (\d+)"),
-                         (r"(\d+) tests? passed", r"(\d+) tests? failed"),
-                         (r"Tests\s+(\d+) passed", r"Tests\s+(\d+) failed")):
+    for pat_p, pat_f in (
+        (r"(\d+) passing", r"(\d+) failing"),
+        (r"Tests:\s+(?:\d+ failed, )?(\d+) passed", r"Tests:\s+(\d+) failed"),
+        (r"# pass (\d+)", r"# fail (\d+)"),
+        (r"ℹ pass (\d+)", r"ℹ fail (\d+)"),
+        (r"(\d+) tests? passed", r"(\d+) tests? failed"),
+        (r"Tests\s+(\d+) passed", r"Tests\s+(\d+) failed"),
+    ):
         p = re.search(pat_p, output)
         if p:
             passed = int(p.group(1))
@@ -63,7 +100,7 @@ def count_tests(output: str) -> dict:
 
 
 def output_dir(ws: Path) -> Optional[Path]:
-    for name in ("dist", "build", "out", "public"):
+    for name in ("dist", "build", "out"):
         d = ws / name
         if (d / "index.html").exists():
             return d
@@ -89,10 +126,15 @@ def smoke(site: Path) -> dict:
         for src in re.findall(r'<script[^>]+src="([^"]+)"', html):
             if src.startswith("http"):
                 continue
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/{src.lstrip('./')}", timeout=10) as r:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/{src.lstrip('./')}", timeout=10
+            ) as r:
                 body = r.read()
                 checks.append({"url": src, "status": r.status, "bytes": len(body)})
-        ok = all(c["status"] == 200 and c["bytes"] > 0 for c in checks) and len(checks) >= 1
+        ok = (
+            all(c["status"] == 200 and c["bytes"] > 0 for c in checks)
+            and len(checks) >= 1
+        )
         return {"ok": ok, "checks": checks, "port": port}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "checks": checks, "error": str(exc)}

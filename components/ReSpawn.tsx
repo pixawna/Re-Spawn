@@ -1,15 +1,37 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import GraveyardScene from "./GraveyardScene";
 import ResurrectionMap from "./ResurrectionMap";
 import Journal from "./Journal";
+import Investigation, { type WhyChain } from "./Investigation";
 import Heartbeat, { type Pulse } from "./Heartbeat";
 import Resurrection from "./Resurrection";
 import Pixel from "./Pixel";
 import { reaper, shovel, type Mood } from "@/lib/sprites";
-import { api, API, replay, type Certificate, type GraphMap, type MapNode, type Project, type Rules, type RunEvent } from "@/lib/api";
+import {
+  api,
+  API,
+  replay,
+  type Certificate,
+  type GraphMap,
+  type MapNode,
+  type Project,
+  type Rules,
+  type RunEvent,
+} from "@/lib/api";
 
-type Health = { graph: { mode: string; detail: string }; stats: Record<string, number> };
+type Health = {
+  agent?: { claude_available: boolean; model: string };
+  graph: { mode: string; detail: string };
+  stats: Record<string, number>;
+};
 
 const STATUS_TEXT: Record<string, string> = {
   unverified: "Not checked yet",
@@ -36,6 +58,9 @@ function recipeText(op: Record<string, string>) {
 }
 
 export default function ReSpawn() {
+  const [agentMode, setAgentMode] = useState("auto");
+  const [chain, setChain] = useState<WhyChain | null>(null);
+  const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
@@ -91,8 +116,12 @@ export default function ReSpawn() {
     api<Project[]>("/api/projects")
       .then(setProjects)
       .catch(() => setOffline(true));
-    api<Health>("/api/health").then(setHealth).catch(() => setOffline(true));
-    api<Rules>("/api/rules").then(setRules).catch(() => {});
+    api<Health>("/api/health")
+      .then(setHealth)
+      .catch(() => setOffline(true));
+    api<Rules>("/api/rules")
+      .then(setRules)
+      .catch(() => {});
   }, []);
 
   const subscribe = useCallback(
@@ -107,7 +136,11 @@ export default function ReSpawn() {
       esRef.current = es;
       es.onmessage = (msg) => {
         const ev = JSON.parse(msg.data) as RunEvent;
-        setEvents((prev) => (prev.length && prev[prev.length - 1].seq >= ev.seq ? prev : [...prev, ev]));
+        setEvents((prev) =>
+          prev.length && prev[prev.length - 1].seq >= ev.seq
+            ? prev
+            : [...prev, ev],
+        );
         if (ev.type === "phase") setPhase(String(ev.phase));
         if (ev.type === "say") setMood((ev.mood as Mood) || "neutral");
         if (ev.type === "graph") loadMap(pid);
@@ -118,7 +151,9 @@ export default function ReSpawn() {
           setRunningProject(null);
           loadMap(pid, true);
           loadProjects();
-          api<Rules>("/api/rules").then(setRules).catch(() => {});
+          api<Rules>("/api/rules")
+            .then(setRules)
+            .catch(() => {});
           if (ev.status === "alive" || ev.status === "build-passing") {
             setMood("happy");
             setCert(ev.certificate as Certificate);
@@ -139,6 +174,8 @@ export default function ReSpawn() {
   const open = useCallback(
     (pid: string) => {
       setSelected(pid);
+      setChain(null);
+      setHighlightIds([]);
       setNode(null);
       setView("map");
       setMap(null);
@@ -146,7 +183,8 @@ export default function ReSpawn() {
       loadMap(pid, true);
       const p = projects.find((x) => x.id === pid);
       if (p?.run && pid !== runningProject) {
-        if (p.run.status === "running") subscribe(p.run.id, pid);
+        if (["running", "awaiting_approval"].includes(p.run.status))
+          subscribe(p.run.id, pid);
         else {
           esRef.current?.close();
           setRunId(p.run.id);
@@ -178,7 +216,10 @@ export default function ReSpawn() {
     setPhase("diagnose");
     setMood("thinking");
     try {
-      const run = await api<{ id: string }>(`/api/projects/${selected}/resurrect`, { method: "POST" });
+      const run = await api<{ id: string }>(
+        `/api/projects/${selected}/resurrect`,
+        { method: "POST", body: JSON.stringify({ mode: agentMode }) },
+      );
       subscribe(run.id, selected);
       loadProjects();
     } catch (e) {
@@ -188,7 +229,12 @@ export default function ReSpawn() {
 
   const updateRules = async (patch: Partial<Rules>) => {
     try {
-      setRules(await api<Rules>("/api/rules", { method: "POST", body: JSON.stringify(patch) }));
+      setRules(
+        await api<Rules>("/api/rules", {
+          method: "POST",
+          body: JSON.stringify(patch),
+        }),
+      );
       setNotice("Rule saved in FalkorDB. It applies to the next resurrection.");
     } catch (e) {
       setNotice((e as Error).message);
@@ -207,19 +253,26 @@ export default function ReSpawn() {
     await loadProjects();
     loadMap(selected, true);
     api<Rules>("/api/rules").then(setRules);
-    setNotice("Attempts and learned facts cleared. The project is buried again.");
+    setNotice(
+      "Attempts and learned facts cleared. The project is buried again.",
+    );
   };
 
   const dig = async (e: FormEvent) => {
     e.preventDefault();
     setDigError("");
     if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(url.trim())) {
-      setDigError("Paste a GitHub repository URL, like https://github.com/owner/repo");
+      setDigError(
+        "Paste a GitHub repository URL, like https://github.com/owner/repo",
+      );
       return;
     }
     setDigging(true);
     try {
-      const r = await api<{ id: string }>("/api/projects", { method: "POST", body: JSON.stringify({ url: url.trim() }) });
+      const r = await api<{ id: string }>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({ url: url.trim() }),
+      });
       setUrl("");
       const list = await loadProjects();
       if (list.some((p) => p.id === r.id)) setSelected(r.id);
@@ -233,26 +286,74 @@ export default function ReSpawn() {
   const project = projects.find((p) => p.id === selected) || null;
   const running = !!runningProject && runningProject === selected;
   const status = project?.status || "unverified";
-  const pulse: Pulse = status === "alive" ? "alive" : running && (phase === "repair" || phase === "verify") ? "weak" : "flat";
+  const pulse: Pulse =
+    status === "alive"
+      ? "alive"
+      : running && (phase === "repair" || phase === "verify")
+        ? "weak"
+        : "flat";
 
   const moriAt = useMemo(() => {
     if (!map || !selected) return null;
     if (running && map.run?.active_step) return map.run.active_step;
-    if (running && phase === "repair" && map.run?.active_plan?.length) return map.run.active_plan[map.run.active_plan.length - 1];
-    if (running && phase === "discover") return map.nodes.find((n) => n.blocked && !n.retired)?.id || selected;
-    if ((phase === "verify" || status === "alive") && map.nodes.some((n) => n.kind === "verification")) return "verification";
+    if (running && phase === "repair" && map.run?.active_plan?.length)
+      return map.run.active_plan[map.run.active_plan.length - 1];
+    if (running && phase === "discover")
+      return map.nodes.find((n) => n.blocked && !n.retired)?.id || selected;
+    if (
+      (phase === "verify" || status === "alive") &&
+      map.nodes.some((n) => n.kind === "verification")
+    )
+      return "verification";
     return selected;
   }, [map, selected, running, phase, status]);
 
+  const displayMap = useMemo(() => {
+    if (!map || !chain) return map;
+    return {
+      ...map,
+      layout: "chain" as const,
+      nodes: chain.ids.map(
+        (id, i) =>
+          ({
+            id,
+            kind:
+              i === 0
+                ? "project"
+                : i === chain.ids.length - 1
+                  ? "runtime"
+                  : "package",
+            label: chain.labels[i],
+            status:
+              i === 0
+                ? map.nodes.find((n) => n.kind === "project")?.status
+                : undefined,
+            sub:
+              i === 0
+                ? "Resolved dependency chain"
+                : chain.relationships[i - 1],
+            blocked: i === chain.ids.length - 1,
+          }) as MapNode,
+      ),
+      edges: chain.ids.slice(1).map((id, i) => ({
+        id: `why-${i}`,
+        source: chain.ids[i],
+        target: id,
+        kind: chain.relationships[i],
+        state: "active",
+      })),
+    };
+  }, [map, chain]);
+
   const facts = useMemo(() => {
-    if (!node || !map) return [];
+    if (!node || !displayMap) return [];
     const label = (id: string) => id;
-    return map.edges
+    return displayMap.edges
       .filter((e) => e.source === node.id || e.target === node.id)
       .filter((e) => !["USES"].includes(e.kind) || node.kind !== "project")
       .slice(0, 8)
       .map((e) => `(${label(e.source)})-[:${e.kind}]->(${label(e.target)})`);
-  }, [node, map]);
+  }, [node, displayMap]);
 
   return (
     <div className={`world view-${view}`}>
@@ -267,7 +368,12 @@ export default function ReSpawn() {
           />
           <header className="masthead">
             <h1 className="wordmark" aria-label="re:spawn">
-              re<span className="colon" aria-hidden><i /><i /></span>spawn
+              re
+              <span className="colon" aria-hidden>
+                <i />
+                <i />
+              </span>
+              spawn
             </h1>
             <p className="tagline">Every dead project deserves another life.</p>
           </header>
@@ -278,8 +384,8 @@ export default function ReSpawn() {
               : health?.graph.mode === "replay"
                 ? "Replaying real recorded runs"
                 : health
-                ? `FalkorDB ${health.graph.mode} · ${Object.values(health.stats).reduce((a, b) => a + b, 0)} nodes`
-                : "Connecting to FalkorDB"}
+                  ? `FalkorDB ${health.graph.mode} · ${Object.values(health.stats).reduce((a, b) => a + b, 0)} nodes`
+                  : "Connecting to FalkorDB"}
           </div>
           {view === "graveyard" && (
             <form className="dig" onSubmit={dig}>
@@ -307,40 +413,92 @@ export default function ReSpawn() {
                 </p>
               ) : (
                 <p className="dig-hint">
-                  npm projects only for now. Or click a grave to open its resurrection map.
+                  npm projects only for now. Or click a grave to open its
+                  resurrection map.
                 </p>
               )}
             </form>
           )}
         </section>
 
-        <section className="layer-soil" aria-label="Resurrection map" aria-hidden={view !== "map"}>
+        <section
+          className="layer-soil"
+          aria-label="Resurrection map"
+          aria-hidden={view !== "map"}
+        >
           {project && (
             <>
               <div className="soil-bar">
-                <button className="climb" onClick={() => setView("graveyard")} aria-label="Back to the graveyard">
+                <button
+                  className="climb"
+                  onClick={() => setView("graveyard")}
+                  aria-label="Back to the graveyard"
+                >
                   ↑ Graveyard
                 </button>
                 <div className="soil-title">
                   <h2>{project.name}</h2>
-                  <p className={`st st-${running ? "running" : status}`}>{running ? "Being revived" : STATUS_TEXT[status] || status}</p>
+                  <p className={`st st-${running ? "running" : status}`}>
+                    {running ? "Being revived" : STATUS_TEXT[status] || status}
+                  </p>
                 </div>
                 <Heartbeat pulse={pulse} />
                 <div className="soil-actions">
+                  {!replay() && (
+                    <label className="agent-select">
+                      Controller
+                      <select
+                        aria-label="Agent controller"
+                        value={agentMode}
+                        onChange={(e) => setAgentMode(e.target.value)}
+                        disabled={running}
+                      >
+                        <option value="auto">
+                          Auto ·{" "}
+                          {health?.agent?.claude_available
+                            ? "Claude + MCP"
+                            : "graph fallback"}
+                        </option>
+                        <option value="claude">Claude + MCP</option>
+                        <option value="deterministic">
+                          Deterministic graph
+                        </option>
+                      </select>
+                    </label>
+                  )}
                   {cert && !running && (
-                    <button className="btn-ghost" onClick={() => setShowCert(true)}>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => setShowCert(true)}
+                    >
                       Certificate
                     </button>
                   )}
-                  <button className="btn-life" onClick={resurrect} disabled={running || offline}>
-                    {running ? "Resurrecting…" : status === "alive" ? "Resurrect again" : "Resurrect"}
+                  <button
+                    className="btn-life"
+                    onClick={resurrect}
+                    disabled={running || offline}
+                  >
+                    {running
+                      ? "Resurrecting…"
+                      : status === "alive"
+                        ? "Resurrect again"
+                        : "Resurrect"}
                   </button>
                 </div>
               </div>
               <div className="soil-grid">
                 <div className="map-wrap">
-                  {map ? (
-                    <ResurrectionMap map={map} moriAt={moriAt} mood={mood} selectedId={node?.id || null} onSelect={setNode} />
+                  {displayMap ? (
+                    <ResurrectionMap
+                      map={displayMap}
+                      traceIds={chain?.ids}
+                      highlightIds={highlightIds}
+                      moriAt={moriAt}
+                      mood={mood}
+                      selectedId={node?.id || null}
+                      onSelect={setNode}
+                    />
                   ) : (
                     <div className="map-loading">
                       <Pixel sprite={reaper("thinking")} scale={4} />
@@ -355,24 +513,37 @@ export default function ReSpawn() {
                           <input
                             type="checkbox"
                             checked={rules.teach_conflict}
-                            onChange={(e) => updateRules({ teach_conflict: e.target.checked })}
+                            onChange={(e) =>
+                              updateRules({ teach_conflict: e.target.checked })
+                            }
                             disabled={running}
                           />
                           <span>
-                            FalkorDB knows <code>{rules.conflict.a}</code> conflicts with <code>{rules.conflict.b}</code>
-                            {rules.conflict_learned && <em> (learned from a failure)</em>}
+                            FalkorDB knows <code>{rules.conflict.a}</code>{" "}
+                            conflicts with <code>{rules.conflict.b}</code>
+                            {rules.conflict_learned && (
+                              <em> (learned from a failure)</em>
+                            )}
                           </span>
                         </label>
                         <label>
                           <input
                             type="checkbox"
                             checked={rules.allow_workarounds}
-                            onChange={(e) => updateRules({ allow_workarounds: e.target.checked })}
+                            onChange={(e) =>
+                              updateRules({
+                                allow_workarounds: e.target.checked,
+                              })
+                            }
                             disabled={running}
                           />
                           <span>Allow risky workarounds</span>
                         </label>
-                        <button className="j-link" onClick={forget} disabled={running}>
+                        <button
+                          className="j-link"
+                          onClick={forget}
+                          disabled={running}
+                        >
                           Forget attempts and learned facts
                         </button>
                       </>
@@ -387,26 +558,39 @@ export default function ReSpawn() {
                   </ul>
                   {node && (
                     <aside className="inspect" aria-live="polite">
-                      <button className="inspect-x" onClick={() => setNode(null)} aria-label="Close details">
+                      <button
+                        className="inspect-x"
+                        onClick={() => setNode(null)}
+                        aria-label="Close details"
+                      >
                         ×
                       </button>
                       <h3>{node.label}</h3>
                       {node.sub && <p className="inspect-sub">{node.sub}</p>}
-                      {node.reason && <p className="inspect-bad">{node.reason}</p>}
+                      {node.reason && (
+                        <p className="inspect-bad">{node.reason}</p>
+                      )}
                       {node.why && <p>{node.why}</p>}
                       {node.kind === "migration" && (
                         <>
                           <p className="inspect-meta">
-                            Cost {node.cost}, {node.risk} risk. {node.state === "pruned" ? "Ruled out: " + node.reasons?.join("; ") : `State: ${node.state}.`}
+                            Cost {node.cost}, {node.risk} risk.{" "}
+                            {node.state === "pruned"
+                              ? "Ruled out: " + node.reasons?.join("; ")
+                              : `State: ${node.state}.`}
                           </p>
                           <ul className="inspect-recipe">
-                            {node.recipe?.map((op, i) => <li key={i}>{recipeText(op)}</li>)}
+                            {node.recipe?.map((op, i) => (
+                              <li key={i}>{recipeText(op)}</li>
+                            ))}
                           </ul>
                         </>
                       )}
                       {facts.length > 0 && (
                         <>
-                          <p className="inspect-label">Relationships in FalkorDB</p>
+                          <p className="inspect-label">
+                            Relationships in FalkorDB
+                          </p>
                           <ul className="inspect-facts">
                             {facts.map((f) => (
                               <li key={f}>
@@ -419,10 +603,24 @@ export default function ReSpawn() {
                     </aside>
                   )}
                 </div>
-                <Journal events={events} phase={phase} done={done} />
+                <div className="journal-stack">
+                  <Journal events={events} phase={phase} done={done} />
+                  <Investigation
+                    key={`${project.id}:${runId ?? "idle"}`}
+                    projectId={project.id}
+                    runId={runId}
+                    events={events}
+                    onChain={setChain}
+                    onHighlight={setHighlightIds}
+                  />
+                </div>
               </div>
               {notice && (
-                <p className="notice" role="status" onAnimationEnd={() => setNotice("")}>
+                <p
+                  className="notice"
+                  role="status"
+                  onAnimationEnd={() => setNotice("")}
+                >
                   {notice}
                 </p>
               )}
@@ -430,8 +628,14 @@ export default function ReSpawn() {
           )}
         </section>
       </div>
-      {showCert && cert && <Resurrection cert={cert} onClose={() => setShowCert(false)} />}
-      {runId && <span className="sr-only" aria-live="polite">{phase ? `Phase: ${phase}` : ""}</span>}
+      {showCert && cert && (
+        <Resurrection cert={cert} onClose={() => setShowCert(false)} />
+      )}
+      {runId && (
+        <span className="sr-only" aria-live="polite">
+          {phase ? `Phase: ${phase}` : ""}
+        </span>
+      )}
     </div>
   );
 }

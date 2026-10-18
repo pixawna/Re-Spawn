@@ -7,6 +7,7 @@ Claude Desktop config:
     {"mcpServers": {"respawn": {"command": "python", "args": ["-m", "backend.mcp_server"],
                                 "cwd": "/path/to/Re-Spawn"}}}
 """
+
 from __future__ import annotations
 
 try:  # mcp 2.x
@@ -14,8 +15,9 @@ try:  # mcp 2.x
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP
 
+from . import config  # load local environment before graph initialization
 from .agent import orchestrator as orch
-from .graph import planner, schema
+from .graph import planner, schema, dependencies
 
 mcp = FastMCP("respawn")
 schema.init()
@@ -52,10 +54,18 @@ def find_alternative(project_id: str, failed_plan: str) -> dict:
 
 
 @mcp.tool()
-def record_attempt(project_id: str, run_id: str, steps: list[str], outcome: str, error_class: str = "",
-                   summary: str = "") -> dict:
+def record_attempt(
+    project_id: str,
+    run_id: str,
+    steps: list[str],
+    outcome: str,
+    error_class: str = "",
+    summary: str = "",
+) -> dict:
     """Store an Attempt node and TRIED edges for a plan you executed yourself."""
-    return planner.record_attempt(project_id, run_id, steps, outcome, error_class, summary)
+    return planner.record_attempt(
+        project_id, run_id, steps, outcome, error_class, summary
+    )
 
 
 @mcp.tool()
@@ -75,6 +85,18 @@ def run_status(run_id: str) -> dict:
     """Status, phase and certificate of a resurrection run."""
     run = orch.RUNS.get(run_id)
     return run.to_dict() if run else {"error": "unknown run"}
+
+
+@mcp.tool()
+def trace_dependency_chain(project_id: str) -> dict:
+    """Trace resolved lockfile relationships to runtime conflicts with source evidence."""
+    return dependencies.why_chains(project_id)
+
+
+@mcp.tool()
+def rank_blockers(project_id: str) -> dict:
+    """Rank packages by incoming dependency degree in FalkorDB."""
+    return dependencies.rank_blockers(project_id)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,9 @@
-export const API = (process.env.NEXT_PUBLIC_RESPAWN_API || "http://localhost:8000").replace(/\/$/, "");
+export const API = (
+  process.env.NEXT_PUBLIC_RESPAWN_API || "http://localhost:8000"
+).replace(/\/$/, "");
 
-export type Status = "unverified" | "diagnosing" | "dead" | "alive" | "build-passing" | string;
+export type Status =
+  "unverified" | "diagnosing" | "dead" | "alive" | "build-passing" | string;
 
 export type Project = {
   id: string;
@@ -34,8 +37,20 @@ export type Certificate = {
   before: Record<string, string>;
   after: Record<string, string>;
   steps: string[];
-  attempts: { n: number; titles: string[]; outcome: string; error?: string; stage?: string }[];
+  attempts: {
+    n: number;
+    titles: string[];
+    outcome: string;
+    error?: string;
+    stage?: string;
+  }[];
   tests: { passed: number; failed: number };
+  verification?: {
+    build: boolean;
+    tests_passed: number;
+    tests_failed: number;
+    smoke: boolean;
+  };
   smoke: { url: string; status: number; bytes: number }[];
   status: string;
   graph: string;
@@ -43,11 +58,21 @@ export type Certificate = {
   patch: string;
   duration: number;
   preview: string | null;
+  decision_trace?: RunEvent[];
+  verification_scope?: string;
 };
 
 export type MapNode = {
   id: string;
-  kind: "project" | "package" | "runtime" | "migration" | "target" | "runtime-target" | "attempt" | "verification";
+  kind:
+    | "project"
+    | "package"
+    | "runtime"
+    | "migration"
+    | "target"
+    | "runtime-target"
+    | "attempt"
+    | "verification";
   label: string;
   sub?: string;
   status?: string;
@@ -83,9 +108,19 @@ export type Plan = {
   cost: number;
   feasible: boolean;
   reasons: string[];
+  approval_required?: boolean;
+  shared_learning?: Record<string, unknown>[];
+  evidence?: {
+    query: string;
+    params: Record<string, unknown>;
+    result: unknown[];
+    row_count?: number;
+    tag?: string;
+  }[];
 };
 
 export type GraphMap = {
+  layout?: "recovery" | "chain";
   nodes: MapNode[];
   edges: MapEdge[];
   plans: Plan[];
@@ -100,7 +135,12 @@ export type Rules = {
   conflict: { a: string; b: string };
 };
 
-export type RunEvent = { seq: number; type: string; t: number; [k: string]: unknown };
+export type RunEvent = {
+  seq: number;
+  type: string;
+  t: number;
+  [k: string]: unknown;
+};
 
 // Hosted demo mode: a page can install window.__RESPAWN_REPLAY__ to serve recorded runs instead of a live backend.
 type Replay = {
@@ -112,7 +152,10 @@ type Replay = {
 
 export function replay(): Replay | null {
   if (typeof window === "undefined") return null;
-  return (window as unknown as { __RESPAWN_REPLAY__?: Replay }).__RESPAWN_REPLAY__ ?? null;
+  return (
+    (window as unknown as { __RESPAWN_REPLAY__?: Replay }).__RESPAWN_REPLAY__ ??
+    null
+  );
 }
 
 export function assetUrl(path: string) {

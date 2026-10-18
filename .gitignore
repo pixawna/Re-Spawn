@@ -48,3 +48,6 @@ backend/.respawn/
 .replay-*/
 recordings.json
 out/
+
+!.env.example
+.pytest_cache/

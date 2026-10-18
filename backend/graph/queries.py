@@ -23,6 +23,11 @@ Graph model
 """
 
 SCHEMA = [
+    "CREATE INDEX FOR (n:InstalledPackage) ON (n.id)",
+    "CREATE INDEX FOR (n:InstalledPackage) ON (n.project)",
+    "CREATE INDEX FOR (n:RecoveryState) ON (n.id)",
+    "CREATE INDEX FOR (n:RecoveryState) ON (n.evaluation)",
+    "CREATE INDEX FOR (n:RuntimeAPI) ON (n.id)",
     "CREATE INDEX FOR (n:Project) ON (n.id)",
     "CREATE INDEX FOR (n:PackageVersion) ON (n.id)",
     "CREATE INDEX FOR (n:Runtime) ON (n.id)",
@@ -99,7 +104,9 @@ MATCH (p:Project {id: $id}), (rt:Runtime {id: $runtime})
 MERGE (p)-[:RUNS_ON]->(rt)
 """
 
-SET_STATUS = "MATCH (p:Project {id: $id}) SET p.status = $status, p.updated = timestamp()"
+SET_STATUS = (
+    "MATCH (p:Project {id: $id}) SET p.status = $status, p.updated = timestamp()"
+)
 
 LIST_PROJECTS = """
 MATCH (p:Project)
@@ -160,7 +167,7 @@ TARGET_CONFLICTS = """
 MATCH (m:Migration {id: $mid})-[:TO]->(t:PackageVersion)-[c:CONFLICTS_WITH]-(other:PackageVersion)<-[:USES]-(p:Project {id: $id})
 OPTIONAL MATCH (fix:Migration)-[:FROM]->(other)
 WHERE NOT (fix)-[:TO]->(:PackageVersion)-[:CONFLICTS_WITH]-(t)
-RETURN other.id AS blocked_by, c.reason AS reason, c.learned AS learned, collect(fix.id) AS fixes
+RETURN other.id AS blocked_by, c.reason AS reason, c.learned AS learned, c.source_project AS source_project, c.run_id AS source_run, collect(fix.id) AS fixes
 """
 
 TARGET_STILL_INCOMPATIBLE = """
@@ -199,7 +206,7 @@ RETURN v.id AS id
 LEARN_CONFLICT = """
 MATCH (a:PackageVersion {id: $a}), (b:PackageVersion {id: $b})
 MERGE (a)-[c:CONFLICTS_WITH]->(b)
-SET c.reason = $reason, c.learned = true, c.evidence = $evidence
+SET c.reason = $reason, c.learned = true, c.evidence = $evidence, c.source_project=$source_project, c.run_id=$run_id
 RETURN a.id AS a, b.id AS b
 """
 
@@ -230,7 +237,7 @@ ORDER BY a.at, t.order
 
 LEARNED_CONFLICTS = """
 MATCH (a:PackageVersion)-[c:CONFLICTS_WITH {learned: true}]->(b:PackageVersion)
-RETURN a.id AS a, b.id AS b, c.reason AS reason, c.evidence AS evidence
+RETURN a.id AS a, b.id AS b, c.reason AS reason, c.evidence AS evidence, c.source_project AS source_project, c.run_id AS source_run
 """
 
 RETIRED_PACKAGES = """
@@ -252,7 +259,9 @@ FORGET_CONFLICT = "MATCH (:PackageVersion {id: $a})-[c:CONFLICTS_WITH]-(:Package
 
 HAS_CONFLICT = "MATCH (:PackageVersion {id: $a})-[c:CONFLICTS_WITH]-(:PackageVersion {id: $b}) RETURN c.learned AS learned"
 
-SET_POLICY = "MATCH (p:Policy {id: 'default'}) SET p.allow_workarounds = $allow_workarounds"
+SET_POLICY = (
+    "MATCH (p:Policy {id: 'default'}) SET p.allow_workarounds = $allow_workarounds"
+)
 
 DELETE_PROJECT = """
 MATCH (p:Project {id: $id})
