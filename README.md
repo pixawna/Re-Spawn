@@ -77,6 +77,47 @@ The LLM is not asked to invent shell commands. Migrations are deterministic reci
 
 ## Graph data model
 
+```mermaid
+flowchart LR
+    P["Project<br/>legacy-todo-app"] -->|USES / USED history| A["Artifact<br/>npm:webpack@4"]
+    P -->|RUNS_ON| E["Environment<br/>node@22"]
+    A -->|INCOMPATIBLE_WITH| E
+    CLI["Artifact<br/>npm:webpack-cli@3"] -->|"CONFLICTS_WITH · learned"| B["Artifact<br/>npm:webpack@5"]
+    M["Migration<br/>upgrade webpack 4 → 5"] -->|FROM| A
+    M -->|TO| B
+    M -->|REQUIRES| PRE["Migration<br/>upgrade webpack-cli first"]
+    P -->|HAD_ATTEMPT| AT["Attempt<br/>outcome + error evidence"]
+    AT -->|TRIED| M
+    AT -->|PRODUCED| V["Verification<br/>build + tests + HTTP"]
+    POL["Policy<br/>workarounds + EOL penalty"]
+```
+
+Arrows follow the stored relationship direction: a migration points **FROM** the old artifact and **TO** its replacement. `Policy` is a standalone node read by the planner. `Artifact` and `Environment` are ecosystem-neutral; the Python demo uses the same model for `python-stdlib:distutils@3`, `pypi:packaging@24`, and `python@3.12`.
+
+### How Mori queries the graph
+
+Claude selects these run-scoped tools through MCP; the deterministic fallback uses the same planner and graph facts.
+
+| Agent tool | Graph traversal / decision |
+| --- | --- |
+| `find_blockers` | Follow `Project → USES → Artifact → INCOMPATIBLE_WITH → Environment`, requiring that environment to match the project's `RUNS_ON` edge. Also check conflicts between artifacts the project uses. |
+| `trace_dependency_chain` | Follow `LOCK_ROOT → DEPENDS_ON` up to 10 hops, then `USES_API → INCOMPATIBLE_WITH` (or `VERSION → Artifact`) to explain an npm failure. Python uses source-import evidence on `USES` / historical `USED` edges. |
+| `get_migration_options` / `resolve_prerequisites` | Read `Migration → FROM / TO`, walk `REQUIRES` up to four hops, and inspect conflicts the target would introduce. |
+| `rank_recovery_plans` / `find_alternative` | Read policy and failed attempts, materialize feasible candidate states, and ask FalkorDB `algo.SPpaths` for the minimum-weight route. |
+| `execute_plan` | Run the selected recipes in a fresh sandbox. Record attempts and verification; supported failures add learned `CONFLICTS_WITH` facts before replanning. A selected route still needs real verification. |
+
+Planning temporarily adds this graph, then removes it after evaluation:
+
+```mermaid
+flowchart LR
+    S["RecoveryState<br/>current versions + environment"] -->|"RECOVERY_STEP<br/>migration + weight"| I["RecoveryState<br/>after prerequisite"]
+    I -->|"RECOVERY_STEP<br/>migration + weight"| T["RecoveryState<br/>eligible route goal"]
+```
+
+Weights include migration cost, risk and any EOL penalty. The goal means **eligible for execution**; the separate `Verification` node records whether the repaired project actually works. See the implementation in [graph queries](backend/graph/queries.py), [dependency tracing](backend/graph/dependencies.py), and [shortest-path planning](backend/graph/paths.py). The report preserves the queries and decision evidence.
+
+### Node and relationship reference
+
 ```
 (:Project {id, name, ecosystem, source, status})
 (:Artifact {id: "npm:webpack@4", ecosystem: "npm", name, major})
@@ -102,7 +143,7 @@ The seed knowledge covers webpack 4/5, webpack-cli, webpack-dev-server, css/styl
 
 ### Key Cypher queries
 
-All of them live in [`backend/graph/queries.py`](backend/graph/queries.py) and are streamed to the UI's _Cypher_ tab as they run.
+Core queries live in [`backend/graph/queries.py`](backend/graph/queries.py); dependency and algorithm queries live in the linked modules above. Queries are streamed to the UI's _Cypher_ tab as they run.
 
 **find_blockers**: a package the project uses is incompatible with the runtime it runs on.
 
