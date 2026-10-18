@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import httpx
+from .recovery.adapters import get_adapter
 
 
 def create(run, project, source):
@@ -73,7 +74,9 @@ def create(run, project, source):
                 return run.pull_request
             base_commit = call("GET", prefix + "/git/commits/" + base_sha)
             files = {}
-            for name in ("package.json", ".npmrc", "package-lock.json"):
+            for name in get_adapter(source).patch_files(
+                source, run.workspace, getattr(run, "modified_files", ())
+            ):
                 target = run.workspace / name
                 original = source / name
                 if target.exists() and (

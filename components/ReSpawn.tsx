@@ -52,7 +52,11 @@ function recipeText(op: Record<string, string>) {
     case "npmrc":
       return `Write ${op.key}=${op.value} to .npmrc`;
     case "runtime":
-      return `Run on Node.js ${op.node}`;
+      return op.environment
+        ? `Run in ${op.environment}`
+        : `Run on Node.js ${op.node}`;
+    case "source_replace":
+      return `Replace ${op.old} with ${op.new}`;
   }
   return JSON.stringify(op);
 }
@@ -413,7 +417,7 @@ export default function ReSpawn() {
                 </p>
               ) : (
                 <p className="dig-hint">
-                  npm projects only for now. Or click a grave to open its
+                  npm and Python 3.12 projects. Click a grave to open its
                   resurrection map.
                 </p>
               )}
@@ -437,7 +441,12 @@ export default function ReSpawn() {
                   ↑ Graveyard
                 </button>
                 <div className="soil-title">
-                  <h2>{project.name}</h2>
+                  <h2>
+                    {project.name}{" "}
+                    <span className="ecosystem-badge">
+                      {project.ecosystem === "pypi" ? "Python" : "npm"}
+                    </span>
+                  </h2>
                   <p className={`st st-${running ? "running" : status}`}>
                     {running ? "Being revived" : STATUS_TEXT[status] || status}
                   </p>
@@ -571,6 +580,11 @@ export default function ReSpawn() {
                         <p className="inspect-bad">{node.reason}</p>
                       )}
                       {node.why && <p>{node.why}</p>}
+                      {node.source && (
+                        <a href={node.source} target="_blank" rel="noreferrer">
+                          Compatibility source ↗
+                        </a>
+                      )}
                       {node.kind === "migration" && (
                         <>
                           <p className="inspect-meta">

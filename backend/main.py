@@ -37,12 +37,17 @@ EXAMPLE_PROJECTS = [
         "owner": "respawn-examples",
         "source": "example:legacy-kanban-app",
     },
+    {
+        "id": "legacy-python-report",
+        "name": "legacy-python-report",
+        "owner": "respawn-examples",
+        "source": "example:legacy-python-report",
+    },
 ]
 
 
 def _bootstrap() -> dict:
     info = schema.init()
-    runtime = f"node@{schema.current_node_major()}"
     for ex in EXAMPLE_PROJECTS:
         if not orch.get_project(ex["id"]):
             orch.register_project(
@@ -51,7 +56,6 @@ def _bootstrap() -> dict:
                 ex["source"],
                 ex["owner"],
                 orch.EXAMPLES / ex["source"].split(":", 1)[1],
-                runtime,
             )
     return info
 
@@ -75,7 +79,7 @@ app.add_middleware(
 def health():
     stats = {r["label"]: r["c"] for r in client.run(Q.STATS, quiet=True)}
     runtimes = client.run(
-        "MATCH (r:Runtime) RETURN r.id AS id, r.available AS available, r.eol AS eol ORDER BY r.major",
+        "MATCH (r:Environment) RETURN r.id AS id, r.available AS available, r.eol AS eol ORDER BY r.major",
         quiet=True,
     )
     return {
@@ -103,6 +107,7 @@ def projects():
                 "name": p["name"],
                 "owner": p.get("owner", ""),
                 "source": p.get("source", ""),
+                "ecosystem": p.get("ecosystem", "npm"),
                 "status": p.get("status", "unverified"),
                 "description": p.get("description", ""),
                 "runtime": r["runtime"],
@@ -144,7 +149,6 @@ def add_project(body: NewProject):
                 f"git:{body.url.strip()}",
                 owner,
                 path,
-                f"node@{schema.current_node_major()}",
             )
         except FileNotFoundError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -191,7 +195,6 @@ def _reset(pid: str, forget: bool) -> None:
         project["source"],
         project.get("owner", ""),
         orch.project_dir(project),
-        f"node@{schema.current_node_major()}",
     )
     client.run(Q.SET_STATUS, {"id": pid, "status": "unverified"}, quiet=True)
     orch.LATEST.pop(pid, None)

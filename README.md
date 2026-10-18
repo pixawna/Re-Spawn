@@ -4,9 +4,9 @@
 
 Built for Graph Hacks, Track 1: _Agents That Act on Connected Data_.
 
-Old projects die quietly. Nobody touched the code, but Node.js moved on, OpenSSL 3 dropped MD4, and now `npm run build` crashes. Re:Spawn digs up a repository, runs its real build in a sandbox, asks **FalkorDB** which recovery routes are feasible, applies the best one, and keeps going until the app builds, passes its tests and serves over HTTP. When a route fails, the agent writes what it learned back into the graph and replans.
+Old projects die quietly. Node.js moves on and an old webpack build crashes; Python 3.12 removes distutils and a report generator stops importing. Re:Spawn digs up a repository, runs its real build in a sandbox, asks **FalkorDB** which recovery routes are feasible, applies the best one, and keeps going until the app builds, passes its tests and serves over HTTP. When a route fails, the agent writes what it learned back into the graph and replans.
 
-You watch all of it happen in a pixel-art graveyard. The graph lives underground, beneath the grave.
+You watch all of it happen in a pixel-art graveyard. The graph lives underground, beneath the grave. **One resurrection graph, many ecosystems.** npm and a focused Python 3.12 recovery are live; Java, Docker, CI and Kubernetes are roadmap adapters. See [the adapter architecture and roadmap](docs/ecosystems.md).
 
 ---
 
@@ -20,7 +20,9 @@ You watch all of it happen in a pixel-art graveyard. The graph lives underground
 6. **Route 2 works.** Fresh sandbox, both upgrades, `npm install`, `npm run build`, `npm test` (8 passing), then an HTTP smoke check of the built site.
 7. **Respawn.** The tombstone cracks, a CRT rises, and the _actual repaired app_ runs inside its screen. You get a collectible certificate with the before/after versions, the route history and the patch.
 
-Build failures and repairs are real npm/webpack operations. The deterministic fallback follows a fixed control loop; optional Claude mode selects tools through MCP. FalkorDB computes the minimum-weight route among supported candidate package states.
+The npm build failures and repairs are real operations. A third grave, **legacy-python-report**, genuinely fails on Python 3.12 because it imports `distutils.version.StrictVersion`. The shared graph plans installation of `packaging==24.2` before replacing that import; the repaired report builds, passes six unittest tests and serves over HTTP. This focused recipe is not a general Python or NumPy migration engine.
+
+Build failures and repairs are real npm/webpack and Python operations. The deterministic fallback follows a fixed control loop; optional Claude mode selects tools through MCP. FalkorDB computes the minimum-weight route among supported candidate package states.
 
 ### Prove the graph is in charge
 
@@ -43,7 +45,7 @@ Next.js (pixel UI, React Flow)  ──SSE──▶  FastAPI  ──▶  Agent lo
                                                       │            │
                                                       ▼            ▼
                                                 FalkorDB      Sandbox executor
-                                          (decisions + memory)  (npm install / build / test, HTTP smoke)
+                                          (decisions + memory)  (ecosystem adapter → install / build / test / HTTP)
                                                       ▲
                                                  MCP server (same tools for Claude / any MCP client)
 ```
@@ -61,10 +63,12 @@ backend/
   graph/planner.py       graph-backed agent tools
   graph/seeds.py         compatibility facts + migration recipes
   graph/schema.py        indexes, seeding, runtime detection
-  recovery/              inspector, executor (sandboxed workspaces), verifier
+  recovery/adapters/     shared contract + npm / Python detect, map, run, classify
+  recovery/              adapter detection, sandbox executor, verifier
   agent/orchestrator.py  the loop + map assembly
   mcp_server.py          MCP tools
-examples/legacy-todo-app the reference patient
+examples/legacy-todo-app the npm reference patient
+examples/legacy-python-report Python 3.12 distutils patient
 ```
 
 The LLM is not asked to invent shell commands. Migrations are deterministic recipes stored on `Migration` nodes; the graph decides which ones are legal and in what order.
@@ -74,27 +78,27 @@ The LLM is not asked to invent shell commands. Migrations are deterministic reci
 ## Graph data model
 
 ```
-(:Project {id, name, source, status})
-(:PackageVersion {id: "webpack@4", name, major})
-(:Runtime {id: "node@22", major, available, eol, path})
+(:Project {id, name, ecosystem, source, status})
+(:Artifact {id: "npm:webpack@4", ecosystem: "npm", name, major})
+(:Environment {id: "python@3.12", kind: "python", version: "3.12", available, eol, path})
 (:Migration {id, title, kind, cost, risk, why, recipe})
 (:Attempt {id, run, plan, outcome, error_class, summary})
 (:Verification {build, tests_passed, tests_failed, smoke})
 (:Policy {allow_workarounds, eol_penalty})
 
-(Project)-[:USES {range}]->(PackageVersion)
-(Project)-[:USED {range}]->(PackageVersion)          history after a migration
-(Project)-[:RUNS_ON]->(Runtime)
-(PackageVersion)-[:INCOMPATIBLE_WITH {reason, signature}]->(Runtime)
-(PackageVersion)-[:CONFLICTS_WITH {reason, learned, evidence}]->(PackageVersion)
-(Migration)-[:FROM]->(PackageVersion)
-(Migration)-[:TO]->(PackageVersion | Runtime)
+(Project)-[:USES {range}]->(Artifact)
+(Project)-[:USED {range}]->(Artifact)          history after a migration
+(Project)-[:RUNS_ON]->(Environment)
+(Artifact)-[:INCOMPATIBLE_WITH {reason, signature}]->(Environment)
+(Artifact)-[:CONFLICTS_WITH {reason, learned, evidence}]->(Artifact)
+(Migration)-[:FROM]->(Artifact)
+(Migration)-[:TO]->(Artifact | Environment)
 (Migration)-[:REQUIRES]->(Migration)
 (Project)-[:HAD_ATTEMPT]->(Attempt)-[:TRIED {order}]->(Migration)
 (Attempt)-[:PRODUCED]->(Verification)
 ```
 
-The seed knowledge covers webpack 4/5, webpack-cli, webpack-dev-server, css/style/sass loaders, html-webpack-plugin, react-scripts 3/4/5, node-sass → Dart Sass, OpenSSL workarounds and Node 12–24.
+The seed knowledge covers webpack 4/5, webpack-cli, webpack-dev-server, css/style/sass loaders, html-webpack-plugin, react-scripts 3/4/5, node-sass → Dart Sass, OpenSSL workarounds and detected Node environments, plus the Python distutils → packaging prerequisite chain. Legacy `PackageVersion`/`Runtime` nodes are relabeled in place on startup, preserving edges and learned history; npm IDs gain the `npm:` namespace.
 
 ### Key Cypher queries
 
@@ -103,19 +107,20 @@ All of them live in [`backend/graph/queries.py`](backend/graph/queries.py) and a
 **find_blockers**: a package the project uses is incompatible with the runtime it runs on.
 
 ```cypher
-MATCH (p:Project {id: $id})-[:USES]->(pv:PackageVersion)-[i:INCOMPATIBLE_WITH]->(rt:Runtime)<-[:RUNS_ON]-(p)
+MATCH (p:Project {id: $id})-[:USES]->(pv:Artifact)-[i:INCOMPATIBLE_WITH]->(rt:Environment)<-[:RUNS_ON]-(p)
 RETURN pv.id AS package, rt.id AS runtime, i.reason AS reason, i.signature AS signature
 ```
 
 **get_migration_options**: code migrations from the blocked version, and runtimes it is not incompatible with.
 
 ```cypher
-MATCH (m:Migration)-[:FROM]->(pv:PackageVersion {id: $package})
+MATCH (p:Project {id: $id}), (m:Migration)-[:FROM]->(pv:Artifact {id: $package})
+WHERE p.supported_migrations IS NULL OR m.id IN p.supported_migrations
 OPTIONAL MATCH (m)-[:TO]->(t)
 RETURN m.id AS id, m.title AS title, m.kind AS kind, m.cost AS cost, m.risk AS risk, t.id AS target
 
-MATCH (pv:PackageVersion {id: $package}), (m:Migration {kind: 'runtime'})-[:TO]->(rt:Runtime)
-WHERE NOT (pv)-[:INCOMPATIBLE_WITH]->(rt)
+MATCH (pv:Artifact {id: $package}), (m:Migration {kind: 'runtime'})-[:TO]->(rt:Environment)
+WHERE rt.kind = $environment_kind AND NOT (pv)-[:INCOMPATIBLE_WITH]->(rt)
 RETURN m.id AS id, rt.id AS target, rt.available AS available, rt.eol AS eol
 ```
 
@@ -124,9 +129,9 @@ RETURN m.id AS id, rt.id AS target, rt.available AS available, rt.eol AS eol
 ```cypher
 MATCH (m:Migration {id: $mid})-[:REQUIRES*1..4]->(pre:Migration) RETURN DISTINCT pre.id AS id
 
-MATCH (m:Migration {id: $mid})-[:TO]->(t:PackageVersion)-[c:CONFLICTS_WITH]-(other:PackageVersion)<-[:USES]-(p:Project {id: $id})
+MATCH (m:Migration {id: $mid})-[:TO]->(t:Artifact)-[c:CONFLICTS_WITH]-(other:Artifact)<-[:USES]-(p:Project {id: $id})
 OPTIONAL MATCH (fix:Migration)-[:FROM]->(other)
-WHERE NOT (fix)-[:TO]->(:PackageVersion)-[:CONFLICTS_WITH]-(t)
+WHERE NOT (fix)-[:TO]->(:Artifact)-[:CONFLICTS_WITH]-(t)
 RETURN other.id AS blocked_by, c.reason AS reason, collect(fix.id) AS fixes
 ```
 
@@ -147,7 +152,7 @@ CREATE (p)-[:HAD_ATTEMPT]->(a:Attempt {id: $aid, run: $run, plan: $plan, outcome
 WITH a UNWIND range(0, size($steps) - 1) AS i
 MATCH (m:Migration {id: $steps[i]}) CREATE (a)-[:TRIED {order: i}]->(m)
 
-MATCH (a:PackageVersion {id: $a}), (b:PackageVersion {id: $b})
+MATCH (a:Artifact {id: $a}), (b:Artifact {id: $b})
 MERGE (a)-[c:CONFLICTS_WITH]->(b)
 SET c.reason = $reason, c.learned = true, c.evidence = $evidence
 ```
@@ -186,13 +191,13 @@ The FalkorDB browser is at http://localhost:3001 (compose maps it there so it do
 | `FALKORDB_HOST` / `FALKORDB_PORT` / `FALKORDB_PASSWORD` | `localhost` / `6379`    | FalkorDB server                                          |
 | `RESPAWN_FALKORDB`                                      | `auto`                  | `server`, `embedded`, or `auto` (server, then embedded)  |
 | `RESPAWN_DATA`                                          | `~/.respawn`            | sandboxes, clones, embedded DB file                      |
-| `RESPAWN_SANDBOX`                                       | `local`                 | `docker` runs npm in throwaway `node:<major>` containers |
+| `RESPAWN_SANDBOX`                                       | `local`                 | `docker` uses throwaway Node or `python:3.12-slim` containers |
 | `RESPAWN_PACE`                                          | `0.45`                  | seconds between agent steps, so humans can follow        |
 | `NEXT_PUBLIC_RESPAWN_API`                               | `http://localhost:8000` | where the UI finds the backend                           |
 
 ### Revive your own repository
 
-Paste a GitHub URL into _Dig up a repository_. Re:Spawn clones it, maps its `package.json` onto the graph and runs the same loop. It repairs what the knowledge base knows (webpack 4, CRA 3/4, node-sass, common loaders). For anything else it diagnoses honestly and stops rather than guessing.
+Paste a GitHub URL into _Dig up a repository_. Re:Spawn clones it, detects `package.json`, `requirements.txt`, `pyproject.toml` or literal `setup.py` metadata, maps artifacts onto the graph and runs the same loop. npm takes precedence in mixed repositories. It repairs what the knowledge base knows (webpack 4, CRA 3/4, node-sass, common loaders). For anything else it diagnoses honestly and stops rather than guessing.
 
 ### MCP
 
@@ -247,12 +252,14 @@ npm i --no-save esbuild && node scripts/build-replay.mjs recordings.json out/res
 
 ```bash
 npm run lint && npm run build
+RESPAWN_TEST_GRAPH=1 .venv/bin/python -m pytest tests -q  # local FalkorDB required
 cd examples/legacy-todo-app && npm install && npm run build   # fails on Node >= 17, by design
 ```
 
 ## Limitations
 
-- npm projects only. Yarn/pnpm lockfiles are ignored and regenerated by npm.
+- npm plus a focused Python adapter. Python execution targets 3.12 with `build.py` and unittest discovery; the tested automatic fix requires `requirements.txt` and the exact supported StrictVersion import. Other projects can be detected and diagnosed without claiming an unsupported repair. Yarn/pnpm lockfiles are ignored and regenerated by npm.
+- npm imports resolved lockfile trees; Python maps manifest dependencies and source imports, without a resolved pip transitive graph. See [supported scope and roadmap](docs/ecosystems.md).
 - Trusted examples can run locally in temporary copies with a scrubbed environment. Imported repositories require `RESPAWN_SANDBOX=docker`. Source `.env` files are excluded; containers have resource limits and no secret environment forwarding.
 - "Alive" requires a declared successful build, at least one reported passing test with no failures, and an HTTP asset smoke check. Missing tests or output produce “build-passing.” This is not a browser interaction test suite.
 - Run history (events, previews) lives in memory; attempts and learned facts persist in FalkorDB.
@@ -260,7 +267,7 @@ cd examples/legacy-todo-app && npm install && npm run build   # fails on Node >=
 
 ## AI assistance disclosure
 
-This project was built with help from Claude (Anthropic), which wrote much of the code, the pixel sprites and this README under the author's direction. The migration knowledge base, failure behaviour and every demo result were verified by actually running them.
+This project was built with help from Claude (Anthropic) and OpenAI Codex under the author's direction. The migration knowledge base, failure behaviour and every demo result were verified by actually running them.
 
 ## Agent and graph features
 

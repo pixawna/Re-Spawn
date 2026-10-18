@@ -265,8 +265,8 @@ export default function Investigation({
       {tab === "chain" && (
         <>
           <p className="invest-caption">
-            Resolved package-lock dependencies and source-backed runtime API
-            facts. Import happens during diagnosis.
+            Resolved lockfile dependencies or source-import facts. Evidence is
+            captured during diagnosis.
           </p>
           <div className="invest-actions">
             <button
@@ -304,7 +304,8 @@ export default function Investigation({
           ))}
           {!chains.length && (
             <p className="invest-caption">
-              No chain loaded yet. Run diagnosis first, then trace the tree.
+              No chain loaded yet. Diagnose the project, then trace its
+              dependency or source-import evidence.
             </p>
           )}
         </>

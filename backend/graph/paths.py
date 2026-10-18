@@ -23,16 +23,16 @@ def choose(
     evaluation = "eval:" + uuid.uuid4().hex
     source, target = evaluation + ":start", evaluation + ":goal"
     base_rows = client.run(
-        "MATCH (:Project {id:$id})-[:USES]->(p:PackageVersion) RETURN p.name AS name,p.id AS version",
+        "MATCH (:Project {id:$id})-[:USES]->(p:Artifact) RETURN p.name AS name,p.ecosystem AS ecosystem,p.id AS version",
         {"id": project_id},
         tag="state_space",
     )
     runtimes = client.run(
-        "MATCH (:Project {id:$id})-[:RUNS_ON]->(r:Runtime) RETURN r.id AS id",
+        "MATCH (:Project {id:$id})-[:RUNS_ON]->(r:Environment) RETURN r.id AS id",
         {"id": project_id},
         tag="state_space",
     )
-    base = {r["name"]: r["version"] for r in base_rows}
+    base = {f"{r['ecosystem']}:{r['name']}": r["version"] for r in base_rows}
     base["runtime"] = runtimes[0]["id"] if runtimes else "unknown"
     nodes = {
         source: json.dumps(base, sort_keys=True),
@@ -50,12 +50,20 @@ def choose(
             migration = migrations[step]
             for op in migration["recipe"]:
                 if op["op"] == "runtime":
-                    state["runtime"] = f"node@{op['node']}"
+                    state["runtime"] = migration["target"]
                 elif op["op"] == "set":
-                    state[op["pkg"]] = op["range"]
+                    state[
+                        f"{op.get('ecosystem', migration.get('ecosystem', 'npm'))}:{op['pkg']}"
+                    ] = op["range"]
                 elif op["op"] == "replace":
-                    state.pop(op["pkg"], None)
-                    state[op["with"]] = op["range"]
+                    state.pop(f"{migration.get('ecosystem', 'npm')}:{op['pkg']}", None)
+                    state[f"{migration.get('ecosystem', 'npm')}:{op['with']}"] = op[
+                        "range"
+                    ]
+                elif op["op"] == "source_replace":
+                    state["source_migration:" + step] = hashlib.sha256(
+                        op["new"].encode()
+                    ).hexdigest()
                 elif op["op"] == "npmrc":
                     state["npmrc:" + op["key"]] = op["value"]
             # Plan prefix is part of state to prevent recombining already-failed sequences.
@@ -65,10 +73,7 @@ def choose(
             weight = migration["cost"] + {"low": 0, "medium": 1, "high": 1.5}.get(
                 migration["risk"], 0
             )
-            if migration["kind"] == "runtime" and migration.get("target") in (
-                "node@14",
-                "node@16",
-            ):
+            if migration["kind"] == "runtime" and migration.get("target_eol"):
                 weight += policy.get("eol_penalty") or 0
             edges.append(
                 {

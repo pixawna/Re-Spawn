@@ -47,9 +47,9 @@ def classify(output: str, signatures: list[dict]) -> dict:
                     else ""
                 ),
                 "owner": f"{owner}@{major_of(owner_ver)}",
-                "target": f"{wanted_pkg}@{found_major}"
-                if found_major is not None
-                else None,
+                "target": (
+                    f"{wanted_pkg}@{found_major}" if found_major is not None else None
+                ),
                 "match": peer.group(0),
             }
         return {
@@ -81,6 +81,27 @@ def classify(output: str, signatures: list[dict]) -> dict:
 
 
 def count_tests(output: str) -> dict:
+    unittest = re.search(r"Ran (\d+) tests? in", output)
+    if unittest:
+        summary = re.search(r"FAILED \(([^)]+)\)", output)
+        failures = (
+            sum(
+                int(n)
+                for n in re.findall(r"(?:failures|errors)=(\d+)", summary.group(1))
+            )
+            if summary
+            else 0
+        )
+        skipped = sum(int(n) for n in re.findall(r"skipped=(\d+)", output[-500:]))
+        ok = bool(re.search(r"^OK(?: \([^)]*\))?\s*$", output, re.M))
+        return {
+            "passed": (
+                max(0, int(unittest.group(1)) - failures - skipped)
+                if ok or failures
+                else 0
+            ),
+            "failed": failures,
+        }
     passed = failed = 0
     for pat_p, pat_f in (
         (r"(\d+) passing", r"(\d+) failing"),

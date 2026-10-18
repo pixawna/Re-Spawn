@@ -40,7 +40,7 @@ def test_lock_resolution_preserves_hoisted_and_nested_scoped_packages():
     assert parsed["unresolved"] == []
     assert (
         next(v for v in parsed["versions"] if v["name"] == "@scope/tool")["pv"]
-        == "@scope/tool@2"
+        == "npm:@scope/tool@2"
     )
 
 
@@ -190,62 +190,128 @@ def test_unverified_run_cannot_publish():
 
 def test_workspace_rejects_symlink_escape(tmp_path):
     from backend.recovery.executor import fresh_workspace
-    source=tmp_path/'source';source.mkdir()
-    secret=tmp_path/'outside';secret.write_text('private')
-    (source/'package.json').symlink_to(secret)
-    with pytest.raises(ValueError,match='Symlinked'):fresh_workspace(source,tmp_path/'dest')
-    assert secret.read_text()=='private'
+
+    source = tmp_path / "source"
+    source.mkdir()
+    secret = tmp_path / "outside"
+    secret.write_text("private")
+    (source / "package.json").symlink_to(secret)
+    with pytest.raises(ValueError, match="Symlinked"):
+        fresh_workspace(source, tmp_path / "dest")
+    assert secret.read_text() == "private"
 
 
 def test_silent_commands_obey_timeout(tmp_path, monkeypatch):
-    import sys,time
+    import sys, time
     from backend.recovery.executor import run
-    monkeypatch.setenv('RESPAWN_SANDBOX','local')
-    started=time.monotonic()
-    result=run([sys.executable,'-c','import time;time.sleep(20)'],tmp_path,lambda *_:None,timeout=.2)
-    assert result['code']==124
-    assert time.monotonic()-started<3
+
+    monkeypatch.setenv("RESPAWN_SANDBOX", "local")
+    started = time.monotonic()
+    result = run(
+        [sys.executable, "-c", "import time;time.sleep(20)"],
+        tmp_path,
+        lambda *_: None,
+        timeout=0.2,
+    )
+    assert result["code"] == 124
+    assert time.monotonic() - started < 3
 
 
-def test_draft_pr_contains_only_verified_files_and_trace(tmp_path,monkeypatch):
+def test_draft_pr_contains_only_verified_files_and_trace(tmp_path, monkeypatch):
     import httpx
     from backend import pull_requests
-    source=tmp_path/'source';source.mkdir();ws=tmp_path/'workspace';ws.mkdir()
-    (source/'package.json').write_text('{"version":"1"}')
-    (ws/'package.json').write_text('{"version":"2"}')
-    (ws/'.env').write_text('private-test-value')
-    run=Run('imported');run.status='alive';run.workspace=ws
-    run.certificate={'steps':['Upgrade'],'tests':{'passed':8},'decision_trace':[{'type':'decision','text':'Graph selected upgrade'}]}
-    calls=[]
+
+    source = tmp_path / "source"
+    source.mkdir()
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (source / "package.json").write_text('{"version":"1"}')
+    (ws / "package.json").write_text('{"version":"2"}')
+    (ws / ".env").write_text("private-test-value")
+    run = Run("imported")
+    run.status = "alive"
+    run.workspace = ws
+    run.certificate = {
+        "steps": ["Upgrade"],
+        "tests": {"passed": 8},
+        "decision_trace": [{"type": "decision", "text": "Graph selected upgrade"}],
+    }
+    calls = []
+
     def handler(request):
-        body=json.loads(request.content) if request.content else None;calls.append((request.method,request.url.path,body))
-        path=request.url.path
-        if path.endswith('/git/ref/heads/main'):return httpx.Response(200,json={'object':{'sha':'base'}})
-        if '/git/ref/heads/respawn/' in path:return httpx.Response(404,json={})
-        if path.endswith('/git/commits/base'):return httpx.Response(200,json={'tree':{'sha':'tree-base'}})
-        if path.endswith('/pulls'):
-            return httpx.Response(200,json=[] if request.method=='GET' else {'html_url':'https://github.com/owner/project/pull/1'})
-        if path.endswith('/git/blobs'):return httpx.Response(201,json={'sha':'blob'})
-        if path.endswith('/git/trees'):return httpx.Response(201,json={'sha':'new-tree'})
-        if path.endswith('/git/commits'):return httpx.Response(201,json={'sha':'new-commit'})
-        if path.endswith('/git/refs'):return httpx.Response(201,json={})
-        return httpx.Response(200,json={'default_branch':'main'})
-    original=httpx.Client
-    monkeypatch.setattr(pull_requests.httpx,'Client',lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
-    monkeypatch.setattr(pull_requests.subprocess,'run',lambda *a,**kw:SimpleNamespace(stdout='base\n'))
-    monkeypatch.setenv('GITHUB_TOKEN','test-token')
-    result=pull_requests.create(run,{'source':'git:https://github.com/owner/project','name':'project'},source)
-    assert result['url'].endswith('/pull/1')
-    tree=next(body for method,path,body in calls if path.endswith('/git/trees'))
-    assert {row['path'] for row in tree['tree']}=={'package.json',f'.respawn/{run.id}-certificate.json'}
-    assert next(body for method,path,body in calls if method=='POST' and path.endswith('/pulls'))['draft'] is True
-    count=len(calls);pull_requests.create(run,{'source':'git:https://github.com/owner/project','name':'project'},source)
-    assert len(calls)==count
+        body = json.loads(request.content) if request.content else None
+        calls.append((request.method, request.url.path, body))
+        path = request.url.path
+        if path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": "base"}})
+        if "/git/ref/heads/respawn/" in path:
+            return httpx.Response(404, json={})
+        if path.endswith("/git/commits/base"):
+            return httpx.Response(200, json={"tree": {"sha": "tree-base"}})
+        if path.endswith("/pulls"):
+            return httpx.Response(
+                200,
+                json=(
+                    []
+                    if request.method == "GET"
+                    else {"html_url": "https://github.com/owner/project/pull/1"}
+                ),
+            )
+        if path.endswith("/git/blobs"):
+            return httpx.Response(201, json={"sha": "blob"})
+        if path.endswith("/git/trees"):
+            return httpx.Response(201, json={"sha": "new-tree"})
+        if path.endswith("/git/commits"):
+            return httpx.Response(201, json={"sha": "new-commit"})
+        if path.endswith("/git/refs"):
+            return httpx.Response(201, json={})
+        return httpx.Response(200, json={"default_branch": "main"})
+
+    original = httpx.Client
+    monkeypatch.setattr(
+        pull_requests.httpx,
+        "Client",
+        lambda **kw: original(transport=httpx.MockTransport(handler), **kw),
+    )
+    monkeypatch.setattr(
+        pull_requests.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(stdout="base\n"),
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    result = pull_requests.create(
+        run,
+        {"source": "git:https://github.com/owner/project", "name": "project"},
+        source,
+    )
+    assert result["url"].endswith("/pull/1")
+    tree = next(body for method, path, body in calls if path.endswith("/git/trees"))
+    assert {row["path"] for row in tree["tree"]} == {
+        "package.json",
+        f".respawn/{run.id}-certificate.json",
+    }
+    assert (
+        next(
+            body
+            for method, path, body in calls
+            if method == "POST" and path.endswith("/pulls")
+        )["draft"]
+        is True
+    )
+    count = len(calls)
+    pull_requests.create(
+        run,
+        {"source": "git:https://github.com/owner/project", "name": "project"},
+        source,
+    )
+    assert len(calls) == count
 
 
 @pytest.mark.parametrize("bound", ["*1..10", "* 1 .. 10", "*3", "*..5"])
 def test_query_guard_accepts_bounded_relationship_lengths(bound):
-    assert validate_query(f"MATCH p=()-[:DEPENDS_ON{bound}]->() RETURN p").endswith("LIMIT 30")
+    assert validate_query(f"MATCH p=()-[:DEPENDS_ON{bound}]->() RETURN p").endswith(
+        "LIMIT 30"
+    )
 
 
 def test_approved_plan_is_rejected_if_graph_selects_a_different_route(monkeypatch):
@@ -257,55 +323,95 @@ def test_approved_plan_is_rejected_if_graph_selects_a_different_route(monkeypatc
     session.o = SimpleNamespace(MAX_ATTEMPTS=4)
     session.attempts = []
     session.approved_recipes = [[{"op": "runtime", "node": 16}]]
-    plan = {"id": "original", "steps": ["runtime"], "feasible": True, "approval_required": True}
-    rankings = iter([
-        {"plans": [plan], "chosen": plan},
-        {"plans": [plan], "chosen": {"id": "new-graph-choice"}},
-    ])
+    plan = {
+        "id": "original",
+        "steps": ["runtime"],
+        "feasible": True,
+        "approval_required": True,
+    }
+    rankings = iter(
+        [
+            {"plans": [plan], "chosen": plan},
+            {"plans": [plan], "chosen": {"id": "new-graph-choice"}},
+        ]
+    )
     session.rank = lambda: next(rankings)
     session.await_approval = lambda _: True
-    monkeypatch.setattr(planner, "_migration", lambda _: {"recipe": session.approved_recipes[0]})
+    monkeypatch.setattr(
+        planner, "_migration", lambda _: {"recipe": session.approved_recipes[0]}
+    )
     with pytest.raises(ValueError, match="Graph facts or recipes changed"):
         session.execute("original")
     assert session.run.workspace is None
 
 
-def test_reported_failures_prevent_verified_status_even_with_zero_exit(monkeypatch, tmp_path):
+def test_reported_failures_prevent_verified_status_even_with_zero_exit(
+    monkeypatch, tmp_path
+):
     from backend.agent import orchestrator as orch
 
     run = Run("test")
     run.execution_runtime = "22"
-    (tmp_path / "package.json").write_text('{}')
+    (tmp_path / "package.json").write_text("{}")
     monkeypatch.setattr(orch, "_tool", lambda *a, **kw: {})
     monkeypatch.setattr(orch.planner, "_migration", lambda _: {"title": "Upgrade"})
     monkeypatch.setattr(orch.planner, "apply_success", lambda *a, **kw: None)
     monkeypatch.setattr(orch.client, "run", lambda *a, **kw: [])
     monkeypatch.setattr(orch.inspector, "inspect", lambda _: {"deps": []})
     monkeypatch.setattr(orch.verifier, "output_dir", lambda _: tmp_path)
-    monkeypatch.setattr(orch.verifier, "smoke", lambda _: {"ok": True, "checks": [{"url": "/", "status": 200, "bytes": 10}]})
-    attempts = [{"n": 1, "titles": ["Upgrade"], "steps": ["migration"], "outcome": "build-passing"}]
+    monkeypatch.setattr(
+        orch.verifier,
+        "smoke",
+        lambda _: {"ok": True, "checks": [{"url": "/", "status": 200, "bytes": 10}]},
+    )
+    attempts = [
+        {
+            "n": 1,
+            "titles": ["Upgrade"],
+            "steps": ["migration"],
+            "outcome": "build-passing",
+        }
+    ]
     orch._finish(
-        run, "test", {"name": "test"},
+        run,
+        "test",
+        {"name": "test"},
         {"scripts": {"build": "build", "test": "test"}, "deps": []},
-        tmp_path, tmp_path, ["migration"], {"code": 0, "output": "# pass 1\n# fail 1"}, attempts,
+        tmp_path,
+        tmp_path,
+        ["migration"],
+        {"code": 0, "output": "# pass 1\n# fail 1"},
+        attempts,
     )
     assert run.status == "build-passing"
     assert attempts[0]["outcome"] == "build-passing"
-    assert any(e["type"] == "attempt" and e["status"] == "build-passing" for e in run.events)
+    assert any(
+        e["type"] == "attempt" and e["status"] == "build-passing" for e in run.events
+    )
     assert run.certificate["verification"]["tests_failed"] == 1
     assert run.certificate["verification"]["smoke"] is True
 
 
-
-def test_docker_npm_uses_container_binary_instead_of_host_runtime(monkeypatch, tmp_path):
+def test_docker_npm_uses_container_binary_instead_of_host_runtime(
+    monkeypatch, tmp_path
+):
     from backend.recovery import executor
+
     runtime_dir = tmp_path / "host-node/bin"
     runtime_dir.mkdir(parents=True)
     (runtime_dir / "npm").write_text("host executable")
     monkeypatch.setenv("RESPAWN_SANDBOX", "docker")
     calls = []
-    monkeypatch.setattr(executor, "run", lambda command, *a, **kw: calls.append(command) or {"code": 0})
-    executor.npm(tmp_path, ["run", "build"], lambda *_: None, node_path=str(runtime_dir / "node"), node_major=16)
+    monkeypatch.setattr(
+        executor, "run", lambda command, *a, **kw: calls.append(command) or {"code": 0}
+    )
+    executor.npm(
+        tmp_path,
+        ["run", "build"],
+        lambda *_: None,
+        node_path=str(runtime_dir / "node"),
+        node_major=16,
+    )
     assert calls == [["npm", "run", "build"]]
 
 
@@ -315,9 +421,13 @@ def test_provider_failure_resumes_existing_recovery_session(monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-not-a-real-key")
     with patch("backend.agent.session.RecoverySession") as session, patch(
-        "backend.agent.claude.run_agent", new=AsyncMock(side_effect=TimeoutError("provider timeout"))
+        "backend.agent.claude.run_agent",
+        new=AsyncMock(side_effect=TimeoutError("provider timeout")),
     ):
         run = Run("test", "claude")
         _loop(run)
         session.return_value.fallback.assert_called_once()
-        assert any(e["type"] == "agent_fallback" and e["reason"] == "TimeoutError" for e in run.events)
+        assert any(
+            e["type"] == "agent_fallback" and e["reason"] == "TimeoutError"
+            for e in run.events
+        )

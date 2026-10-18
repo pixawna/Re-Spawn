@@ -1,0 +1,5 @@
+[project]
+name = "legacy-python-report"
+version = "1.0.0"
+description = "An old release report broken by Python 3.12 removing distutils."
+requires-python = ">=3.9"

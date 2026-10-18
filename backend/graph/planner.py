@@ -14,6 +14,7 @@ import uuid
 from typing import Optional
 
 from . import client, queries as Q, paths, dependencies
+from .model import artifact_id
 
 _overrides = contextvars.ContextVar("plan_overrides", default={})
 
@@ -56,11 +57,16 @@ def find_blockers(project_id: str) -> dict:
 
 
 def get_migration_options(project_id: str, package: str) -> dict:
+    package = artifact_id(package)
     code = client.run(
-        Q.PACKAGE_MIGRATIONS, {"package": package}, tag="get_migration_options"
+        Q.PACKAGE_MIGRATIONS,
+        {"id": project_id, "package": package},
+        tag="get_migration_options",
     )
     runtime = client.run(
-        Q.RUNTIME_MIGRATIONS, {"package": package}, tag="get_migration_options"
+        Q.RUNTIME_MIGRATIONS,
+        {"id": project_id, "package": package},
+        tag="get_migration_options",
     )
     return {"package": package, "options": code + runtime}
 
@@ -71,6 +77,9 @@ def _migration(mid: str) -> dict:
         raise KeyError(mid)
     m = dict(rows[0]["m"])
     m["target"] = rows[0]["target"]
+    m["target_eol"] = bool(rows[0].get("target_eol"))
+    m["target_kind"] = rows[0].get("target_kind")
+    m["target_name"] = rows[0].get("target_name")
     m["recipe"] = json.loads(m.get("recipe") or "[]")
     return m
 
@@ -143,7 +152,7 @@ def _resolve_prerequisites(
 
     if m["kind"] == "runtime":
         rt = client.run(
-            "MATCH (rt:Runtime {id: $rid}) RETURN rt.available AS available, rt.eol AS eol",
+            "MATCH (rt:Environment {id: $rid}) RETURN rt.available AS available, rt.eol AS eol",
             {"rid": m["target"]},
             tag="resolve_prerequisites",
         )
@@ -283,7 +292,7 @@ def rank_recovery_plans(project_id: str) -> dict:
                 + (
                     policy.get("eol_penalty", 0)
                     if migrations[s]["kind"] == "runtime"
-                    and migrations[s]["target"] in ("node@14", "node@16")
+                    and migrations[s].get("target_eol")
                     else 0
                 )
                 for s in p["steps"]
@@ -374,6 +383,7 @@ def learn_conflict(
     source_project: str = "",
     run_id: str = "",
 ) -> dict:
+    a, b = artifact_id(a), artifact_id(b)
     rows = client.run(
         Q.LEARN_CONFLICT,
         {
@@ -396,15 +406,15 @@ def learn_conflict(
     }
 
 
-def apply_success(project_id: str, steps: list[str], ranges: dict[str, str]) -> None:
+def apply_success(
+    project_id: str, steps: list[str], ranges: dict[str, str], artifacts=None
+) -> None:
     for s in steps:
         m = _migration(s)
-        if (
-            m.get("target")
-            and "@" in m["target"]
-            and not m["target"].startswith("node@")
-        ):
-            name = m["target"].split("@")[0]
+        if m.get("target") and "@" in m["target"] and not m.get("target_kind"):
+            name = (
+                m.get("target_name") or m["target"].split(":", 1)[-1].rsplit("@", 1)[0]
+            )
             client.run(
                 Q.APPLY_MIGRATION_TO_PROJECT,
                 {"id": project_id, "mid": s, "range": ranges.get(name, "")},
@@ -421,3 +431,13 @@ def apply_success(project_id: str, steps: list[str], ranges: dict[str, str]) -> 
                 {"id": project_id, "runtime": m["target"]},
                 tag="apply_success",
             )
+
+    if artifacts is not None:
+        client.run(
+            "MATCH (p:Project {id:$id})-[u:USES]->(a:Artifact) WHERE NOT a.id IN $current MERGE (p)-[old:USED]->(a) SET old.range=u.range,old.source=u.source DELETE u",
+            {"id": project_id, "current": [a["id"] for a in artifacts]},
+            tag="apply_success",
+        )
+        client.run(
+            Q.LINK_PACKAGES, {"id": project_id, "deps": artifacts}, tag="apply_success"
+        )

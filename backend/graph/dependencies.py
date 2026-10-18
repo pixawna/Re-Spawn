@@ -8,7 +8,7 @@ from . import client
 
 WHY_CHAINS = """
 MATCH (p:Project {id: $id})-[:LOCK_ROOT]->(root:InstalledPackage)
-MATCH path=(root)-[:DEPENDS_ON*1..10]->(leaf:InstalledPackage)-[:USES_API]->(api:RuntimeAPI)-[:INCOMPATIBLE_WITH]->(rt:Runtime)
+MATCH path=(root)-[:DEPENDS_ON*1..10]->(leaf:InstalledPackage)-[:USES_API]->(api:RuntimeAPI)-[:INCOMPATIBLE_WITH]->(rt:Environment)
 WHERE (p)-[:RUNS_ON]->(rt)
 RETURN [n IN nodes(path) | n.id] AS ids,
        [n IN nodes(path) | coalesce(n.name, n.id)] AS labels,
@@ -18,7 +18,7 @@ LIMIT 20
 """
 DEPENDENCY_CHAINS = """
 MATCH (p:Project {id: $id})-[:LOCK_ROOT]->(root:InstalledPackage)
-MATCH path=(root)-[:DEPENDS_ON*1..10]->(leaf:InstalledPackage)-[:VERSION]->(pv:PackageVersion)-[:INCOMPATIBLE_WITH]->(rt:Runtime)
+MATCH path=(root)-[:DEPENDS_ON*1..10]->(leaf:InstalledPackage)-[:VERSION]->(pv:Artifact)-[:INCOMPATIBLE_WITH]->(rt:Environment)
 WHERE (p)-[:RUNS_ON]->(rt)
 RETURN [n IN nodes(path) | n.id] AS ids,
        [n IN nodes(path) | coalesce(n.name, n.id)] AS labels,
@@ -27,9 +27,9 @@ RETURN [n IN nodes(path) | n.id] AS ids,
 LIMIT 20
 """
 DEGREE = """
-MATCH (p:Project {id: $id})-[:RUNS_ON]->(rt:Runtime)
-MATCH (installed:InstalledPackage {project: $id})-[:VERSION]->(pv:PackageVersion)
-WHERE (pv)-[:INCOMPATIBLE_WITH]->(rt) OR (pv)-[:CONFLICTS_WITH]-(:PackageVersion)<-[:USES]-(p)
+MATCH (p:Project {id: $id})-[:RUNS_ON]->(rt:Environment)
+MATCH (installed:InstalledPackage {project: $id})-[:VERSION]->(pv:Artifact)
+WHERE (pv)-[:INCOMPATIBLE_WITH]->(rt) OR (pv)-[:CONFLICTS_WITH]-(:Artifact)<-[:USES]-(p)
 OPTIONAL MATCH (dependent:InstalledPackage {project: $id})-[:DEPENDS_ON]->(installed)
 RETURN pv.id AS package, count(DISTINCT dependent) AS dependents
 ORDER BY dependents DESC
@@ -63,7 +63,7 @@ def parse_lock(lock: dict, project_id: str) -> dict:
             versions.append(
                 {
                     "id": ident(path),
-                    "pv": f"{name}@{int(version.split('.')[0])}",
+                    "pv": f"npm:{name}@{int(version.split('.')[0])}",
                     "name": name,
                     "major": int(version.split(".")[0]),
                 }
@@ -143,7 +143,7 @@ def import_lock(project_id: str, workspace: Path) -> dict:
         )
     for offset in range(0, len(parsed["versions"]), 250):
         client.run(
-            "UNWIND $rows AS r MATCH (n:InstalledPackage {id:r.id}) MERGE (pv:PackageVersion {id:r.pv}) SET pv.name=r.name,pv.major=r.major MERGE (n)-[:VERSION]->(pv)",
+            "UNWIND $rows AS r MATCH (n:InstalledPackage {id:r.id}) MERGE (pv:Artifact {id:r.pv}) SET pv.name=r.name,pv.major=r.major,pv.ecosystem='npm' MERGE (n)-[:VERSION]->(pv)",
             {"rows": parsed["versions"][offset : offset + 250]},
             tag="import_dependencies",
         )
@@ -160,7 +160,7 @@ def import_lock(project_id: str, workspace: Path) -> dict:
             and "md4" in defaults.read_text()
         ):
             client.run(
-                "MATCH (n:InstalledPackage {id:$node}), (rt:Runtime) WHERE rt.major >= 17 "
+                "MATCH (n:InstalledPackage {id:$node}), (rt:Environment) WHERE rt.kind='node' AND rt.major >= 17 "
                 'MERGE (a:RuntimeAPI {id:"crypto.createHash:md4"}) SET a.name="crypto.createHash(md4)",a.source=$source,a.evidence=$evidence '
                 "MERGE (n)-[:USES_API]->(a) MERGE (a)-[:INCOMPATIBLE_WITH]->(rt)",
                 {
@@ -185,6 +185,17 @@ def why_chains(project_id: str) -> dict:
         chains = client.run(
             DEPENDENCY_CHAINS, {"id": project_id}, tag="trace_dependency_chain"
         )
+    if not chains:
+        query = "MATCH path=(p:Project {id:$id})-[u:USES|USED]->(a:Artifact)-[:INCOMPATIBLE_WITH]->(e:Environment) WHERE (p)-[:RUNS_ON]->(e) RETURN [n IN nodes(path)|n.id] AS ids,[n IN nodes(path)|coalesce(n.name,n.id)] AS labels,[r IN relationships(path)|type(r)] AS relationships,u.source AS source"
+        rows = client.run(query, {"id": project_id}, tag="trace_dependency_chain")
+        for chain in rows:
+            chain["labels"][-1] = chain["ids"][-1]
+        return {
+            "chains": rows,
+            "queries": [query],
+            "params": {"id": project_id},
+            "max_dependency_hops": 10,
+        }
     chains = [c for c in chains if len(c["ids"]) == len(set(c["ids"]))]
     chains.sort(key=lambda c: len(c["ids"]), reverse=True)
     for c in chains:

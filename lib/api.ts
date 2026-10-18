@@ -10,6 +10,7 @@ export type Project = {
   name: string;
   owner: string;
   source: string;
+  ecosystem?: string;
   status: Status;
   description: string;
   runtime: string | null;
@@ -34,6 +35,8 @@ export type Certificate = {
   run: string;
   source: string;
   issued: string;
+  ecosystem?: string;
+  environment?: { id?: string; kind: string; version: string };
   before: Record<string, string>;
   after: Record<string, string>;
   steps: string[];
@@ -83,6 +86,7 @@ export type MapNode = {
   cost?: number;
   risk?: string;
   why?: string;
+  source?: string;
   state?: string;
   reasons?: string[];
   recipe?: Record<string, string>[];
@@ -179,4 +183,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(msg);
   }
   return res.json();
+}
+
+export function environmentLabel(
+  environment: { kind: string; version: string } | string | null,
+) {
+  if (!environment) return "Unknown environment";
+  const [kind, version] =
+    typeof environment === "string"
+      ? environment.split("@")
+      : [environment.kind, environment.version];
+  const names: Record<string, string> = {
+    node: "Node.js",
+    python: "Python",
+    jdk: "JDK",
+  };
+  return `${names[kind] ?? kind} ${version ?? ""}`.trim();
 }

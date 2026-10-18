@@ -70,6 +70,7 @@ function buildStory(events: RunEvent[]): Item[] {
         "agent_mode",
         "agent_fallback",
         "dependencies",
+        "unsupported",
         "shared_learning",
       ].includes(ev.type)
     )
@@ -147,6 +148,8 @@ function PlanList({ plans, chosen }: { plans: Plan[]; chosen: string | null }) {
 function EventCard({ ev }: { ev: RunEvent }) {
   const [showDiff, setShowDiff] = useState(false);
   switch (ev.type) {
+    case "unsupported":
+      return <div className="j-card">{String(ev.message)}</div>;
     case "agent_mode":
       return (
         <div className="j-card">
@@ -184,7 +187,11 @@ function EventCard({ ev }: { ev: RunEvent }) {
         <div className="j-card bad">
           <p>
             <strong>
-              {ev.step === "install" ? "npm install" : "npm run build"} failed
+              {String(
+                ev.command ||
+                  (ev.step === "install" ? "npm install" : "npm run build"),
+              )}{" "}
+              failed
             </strong>{" "}
             with exit code {String(ev.code)}.
           </p>

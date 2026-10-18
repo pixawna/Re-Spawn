@@ -21,6 +21,7 @@ from typing import Any, Optional
 from ..graph import client, planner, queries as Q
 from ..recovery import executor, inspector, verifier
 from .tools import TOOLS
+from ..recovery.adapters import get_adapter, environment_label
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = client.DATA_DIR
@@ -39,6 +40,8 @@ class Run:
         self.workspace = None
         self.pull_request = None
         self.execution_runtime = ""
+        self.execution_environment = {}
+        self.modified_files = set()
         self.pr_lock = threading.Lock()
         self.events: list[dict] = []
         self.cond = threading.Condition()
@@ -110,9 +113,17 @@ def clone(url: str, project_id: str, sink) -> Path:
 
 
 def register_project(
-    project_id: str, name: str, source: str, owner: str, path: Path, runtime: str
+    project_id: str,
+    name: str,
+    source: str,
+    owner: str,
+    path: Path,
+    runtime: Optional[str] = None,
 ) -> dict:
     info = inspector.inspect(path)
+    runtime = runtime or info["environment"]
+    if runtime.split("@")[0] != info["environment"].split("@")[0]:
+        raise ValueError("Environment kind does not match the detected ecosystem")
     client.run(
         Q.UPSERT_PROJECT,
         {
@@ -121,6 +132,8 @@ def register_project(
             "source": source,
             "owner": owner,
             "description": info["description"],
+            "ecosystem": info["ecosystem"],
+            "supported_migrations": info.get("supported_migrations"),
         },
         tag="inspect",
     )
@@ -239,7 +252,9 @@ def _phase(run: Run, phase: str, label: str) -> None:
 
 def _runtime_for(major: int) -> dict:
     rows = client.run(
-        "MATCH (rt:Runtime {id: $id}) RETURN rt", {"id": f"node@{major}"}, quiet=True
+        "MATCH (rt:Environment {id: $id}) RETURN rt",
+        {"id": f"node@{major}"},
+        quiet=True,
     )
     return rows[0]["rt"] if rows else {}
 
@@ -297,12 +312,9 @@ def _finish(
     _phase(run, "verify", "Verifying")
     counts = verifier.count_tests(tests.get("output", ""))
     run.emit("verify", check="tests", ok=tests["code"] == 0, **counts)
-    site = verifier.output_dir(ws)
-    smoke = (
-        verifier.smoke(site)
-        if site
-        else {"ok": False, "checks": [], "error": "no index.html in build output"}
-    )
+    adapter = get_adapter(source)
+    smoke = adapter.verify(ws)
+    site = smoke.get("preview")
     run.emit(
         "verify",
         check="smoke",
@@ -325,13 +337,18 @@ def _finish(
         and counts["failed"] == 0
         and smoke["ok"]
     )
+    after = inspector.inspect(ws)
     if steps:
         outcome = "success" if alive else "build-passing"
         if attempts:
             attempts[-1]["outcome"] = outcome
             run.emit(
-                "attempt", n=attempts[-1]["n"], steps=steps,
-                titles=attempts[-1]["titles"], status=outcome, stage="verification",
+                "attempt",
+                n=attempts[-1]["n"],
+                steps=steps,
+                titles=attempts[-1]["titles"],
+                status=outcome,
+                stage="verification",
             )
         _tool(
             run,
@@ -341,26 +358,31 @@ def _finish(
             steps=steps,
             outcome="success" if alive else "build-passing",
             error_class="",
-            summary="build, tests and HTTP smoke check passed"
-            if alive
-            else "Build passed; verification is incomplete",
+            summary=(
+                "build, tests and HTTP smoke check passed"
+                if alive
+                else "Build passed; verification is incomplete"
+            ),
             verification=verification,
         )
-        final_pkg = json.loads((ws / "package.json").read_text())
         ranges = {
-            **(final_pkg.get("dependencies") or {}),
-            **(final_pkg.get("devDependencies") or {}),
+            dependency["name"]: dependency["range"] for dependency in after["deps"]
         }
-        planner.apply_success(pid, steps, ranges)
+        planner.apply_success(pid, steps, ranges, artifacts=after["deps"])
     status = "alive" if alive else "build-passing"
     client.run(Q.SET_STATUS, {"id": pid, "status": status}, tag="inspect")
     run.preview = site
-    after = inspector.inspect(ws)
     run.certificate = {
         "project": project["name"],
         "owner": project.get("owner", ""),
         "run": run.id,
         "source": project.get("source", ""),
+        "ecosystem": info.get("ecosystem", "npm"),
+        "environment": {
+            key: run.execution_environment[key]
+            for key in ("id", "kind", "version")
+            if key in run.execution_environment
+        },
         "issued": time.strftime("%Y-%m-%d %H:%M"),
         "before": {d["name"]: d["range"] for d in info["deps"]},
         "after": {d["name"]: d["range"] for d in after["deps"]},
@@ -395,14 +417,15 @@ def _finish(
                 "approval_resolved",
             )
         ],
-        "verification_scope": "production build, declared tests, HTTP asset smoke checks; no browser interaction test",
+        "verification_scope": smoke.get(
+            "scope", "build, declared tests, and HTTP asset smoke checks"
+        ),
         "patch": run.patch,
         "duration": round(time.time() - run.started, 1),
         "preview": f"/preview/{run.id}/" if site else None,
     }
     run.status = status
     run.emit("graph")
-
 
 
 # ---------------------------------------------------------------- map for the UI
@@ -420,7 +443,7 @@ def project_map(pid: str) -> dict:
 
     # Migrations relevant to this project: from used packages, runtime moves, and anything attempted.
     mig_rows = client.run(
-        "MATCH (p:Project {id: $id})-[:USES|USED]->(pv:PackageVersion)<-[:FROM]-(m:Migration) "
+        "MATCH (p:Project {id: $id})-[:USES|USED]->(pv:Artifact)<-[:FROM]-(m:Migration) "
         "OPTIONAL MATCH (m)-[:TO]->(t) RETURN m, pv.id AS from, t.id AS to",
         {"id": pid},
         quiet=True,
@@ -429,9 +452,15 @@ def project_map(pid: str) -> dict:
     history_blocked = [r["id"] for r in retired if r["incompatible"]]
     if blocked_pkgs or history_blocked:
         mig_rows += client.run(
-            "MATCH (m:Migration {kind: 'runtime'})-[:TO]->(rt:Runtime) RETURN m, null AS from, rt.id AS to",
+            "MATCH (:Project {id:$id})-[:RUNS_ON]->(current:Environment), (m:Migration {kind:'runtime'})-[:TO]->(rt:Environment) WHERE rt.kind=current.kind RETURN m, null AS from, rt.id AS to",
+            {"id": pid},
             quiet=True,
         )
+    mig_rows += client.run(
+        "MATCH (:Project {id:$id})-[:USES|USED]->(:Artifact)<-[:FROM]-(root:Migration)-[:REQUIRES*1..4]->(m:Migration) OPTIONAL MATCH (m)-[:FROM]->(f) OPTIONAL MATCH (m)-[:TO]->(t) RETURN m,f.id AS from,t.id AS to",
+        {"id": pid},
+        quiet=True,
+    )
     tried_ids = {a["migration"] for a in attempts}
     if tried_ids:
         mig_rows += client.run(
@@ -447,7 +476,7 @@ def project_map(pid: str) -> dict:
 
     learned = client.run(Q.LEARNED_CONFLICTS, quiet=True)
     conflicts = client.run(
-        "MATCH (p:Project {id: $id})-[:USES|USED]->(a:PackageVersion)-[c:CONFLICTS_WITH]-(b:PackageVersion) "
+        "MATCH (p:Project {id: $id})-[:USES|USED]->(a:Artifact)-[c:CONFLICTS_WITH]-(b:Artifact) "
         "RETURN DISTINCT a.id AS a, b.id AS b, c.learned AS learned, c.reason AS reason",
         {"id": pid},
         quiet=True,
@@ -533,7 +562,7 @@ def project_map(pid: str) -> dict:
             {
                 "id": runtime["id"],
                 "kind": "runtime",
-                "label": f"Node.js {runtime['major']}",
+                "label": environment_label(runtime),
                 "sub": "installed" if runtime.get("available") else "missing",
             }
         )
@@ -573,6 +602,7 @@ def project_map(pid: str) -> dict:
                 "cost": m["cost"],
                 "risk": m["risk"],
                 "why": m["why"],
+                "source": m.get("source"),
                 "state": st,
                 "reasons": infeasible.get(mid, []),
                 "recipe": json.loads(m.get("recipe") or "[]"),
@@ -590,18 +620,18 @@ def project_map(pid: str) -> dict:
             )
         if m["to"]:
             if m["to"] not in known:
-                to_kind = "runtime-target" if m["to"].startswith("node@") else "target"
+                to_kind = "runtime-target" if m["kind"] == "runtime" else "target"
                 label = (
-                    f"Node.js {m['to'].split('@')[1]}"
+                    m["to"].replace("@", " ")
                     if to_kind == "runtime-target"
-                    else m["to"].split("@")[0]
+                    else m["to"].split(":", 1)[-1].rsplit("@", 1)[0]
                 )
                 nodes.append(
                     {
                         "id": m["to"],
                         "kind": to_kind,
                         "label": label,
-                        "sub": "v" + m["to"].split("@")[1],
+                        "sub": "v" + m["to"].rsplit("@", 1)[-1],
                     }
                 )
                 known.add(m["to"])
@@ -646,6 +676,21 @@ def project_map(pid: str) -> dict:
                     "reason": c["reason"],
                 }
             )
+
+    for row in client.run(
+        "MATCH (m:Migration)-[:REQUIRES]->(pre:Migration) WHERE m.id IN $ids AND pre.id IN $ids RETURN m.id AS a,pre.id AS b",
+        {"ids": list(migs)},
+        quiet=True,
+    ):
+        edges.append(
+            {
+                "id": f"req:{row['a']}:{row['b']}",
+                "source": row["a"],
+                "target": row["b"],
+                "kind": "REQUIRES",
+                "state": state.get(row["b"], "candidate"),
+            }
+        )
 
     # Derived prerequisites (what resolve_prerequisites found) shown as REQUIRES edges.
     for p in plans:

@@ -20,7 +20,17 @@ from pathlib import Path
 from typing import Callable, Optional
 
 IGNORE = shutil.ignore_patterns(
-    "node_modules", ".git", "dist", "build", ".next", ".respawn", ".env", ".env.*"
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    ".respawn",
+    ".env",
+    ".env.*",
+    ".venv",
+    ".respawn-venv",
+    "__pycache__",
 )
 LineSink = Callable[[str, str], None]  # (stream, line)
 
@@ -29,9 +39,26 @@ def fresh_workspace(source: Path, dest: Path) -> Path:
     if dest.exists():
         shutil.rmtree(dest)
     for base, dirs, files in os.walk(source):
-        dirs[:] = [d for d in dirs if d not in {"node_modules", ".git", "dist", "build", ".next", ".respawn"}]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d
+            not in {
+                "node_modules",
+                ".git",
+                "dist",
+                "build",
+                ".next",
+                ".respawn",
+                ".venv",
+                ".respawn-venv",
+                "__pycache__",
+            }
+        ]
         if any((Path(base) / name).is_symlink() for name in [*dirs, *files]):
-            raise ValueError("Symlinked source files are not supported in recovery workspaces")
+            raise ValueError(
+                "Symlinked source files are not supported in recovery workspaces"
+            )
     shutil.copytree(source, dest, ignore=IGNORE)
     return dest
 
@@ -73,9 +100,11 @@ def apply_recipe(ws: Path, recipe: list[dict]) -> dict:
     return {"runtime": runtime}
 
 
-def diff(original: Path, changed: Path) -> str:
+def diff(original: Path, changed: Path, files=None) -> str:
     out = []
-    for name in ("package.json", ".npmrc", "package-lock.json"):
+    for name in (
+        files if files is not None else ("package.json", ".npmrc", "package-lock.json")
+    ):
         a = (
             (original / name).read_text().splitlines(keepends=True)
             if (original / name).exists()
@@ -131,13 +160,14 @@ def run(
     node_path: Optional[str] = None,
     node_major: Optional[int] = None,
     containerize: bool = True,
+    image: Optional[str] = None,
 ) -> dict:
     """Run a command, streaming each output line to `sink`. Returns exit code + tail."""
     sandbox = os.getenv("RESPAWN_SANDBOX", "local")
     container_name = None
     if sandbox == "docker" and containerize:
         container_name = "respawn-exec-" + uuid.uuid4().hex[:12]
-        image = f"node:{node_major or 22}"
+        image = image or f"node:{node_major or 22}"
         cmd = [
             "docker",
             "run",
@@ -209,7 +239,9 @@ def run(
     finally:
         timer.cancel()
     if timed_out.is_set() and container_name:
-        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=30)
+        subprocess.run(
+            ["docker", "rm", "-f", container_name], capture_output=True, timeout=30
+        )
     if timed_out.is_set():
         sink("err", f"timed out after {timeout}s")
     code = (

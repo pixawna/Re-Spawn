@@ -31,7 +31,7 @@ def find_blockers(project_id: str) -> dict:
 
 @mcp.tool()
 def get_migration_options(project_id: str, package: str) -> dict:
-    """Migration nodes FROM a blocked package version (e.g. 'webpack@4'), plus runtime moves."""
+    """Migration nodes FROM a blocked package version (e.g. 'npm:webpack@4'), plus runtime moves."""
     return planner.get_migration_options(project_id, package)
 
 

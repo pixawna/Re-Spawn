@@ -16,7 +16,7 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 SPECS = {
     "diagnose_project": (
-        "Install and build the original project, import its resolved dependency graph, classify the real failure.",
+        "Install and build the original project through its ecosystem adapter, map dependency/source evidence, and classify the real failure.",
         {},
     ),
     "find_blockers": ("Find runtime and package conflicts in FalkorDB.", {}),

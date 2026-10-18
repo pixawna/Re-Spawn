@@ -56,10 +56,10 @@ def ask(project_id: str, question: str) -> dict:
         }
     from anthropic import Anthropic
 
-    schema = """Project(id,name)-USES->PackageVersion(id,name,major); Project-RUNS_ON->Runtime(id,major,available,eol).
-PackageVersion-INCOMPATIBLE_WITH->Runtime; PackageVersion-CONFLICTS_WITH->PackageVersion.
-Migration(id,title,cost,risk)-FROM->PackageVersion; Migration-TO->PackageVersion or Runtime; Migration-REQUIRES->Migration.
-Project-LOCK_ROOT->InstalledPackage(id,name,version,project); InstalledPackage-DEPENDS_ON->InstalledPackage; InstalledPackage-VERSION->PackageVersion.
+    schema = """Project(id,name)-USES->Artifact(id,ecosystem,name,major); Project-RUNS_ON->Environment(id,kind,version,major,available,eol).
+Artifact-INCOMPATIBLE_WITH->Environment; Artifact-CONFLICTS_WITH->Artifact.
+Migration(id,title,cost,risk)-FROM->Artifact; Migration-TO->Artifact or Environment; Migration-REQUIRES->Migration.
+Project-LOCK_ROOT->InstalledPackage(id,name,version,project); InstalledPackage-DEPENDS_ON->InstalledPackage; InstalledPackage-VERSION->Artifact.
 Conflict edges have reason, learned, evidence, source_project. Use $project for the current Project ID.
 Return node IDs as id or ids when possible so the UI can highlight the result.
 Only MATCH/OPTIONAL MATCH/WITH/WHERE/RETURN/ORDER BY are permitted, no CALL, writes, comments or semicolons. Maximum traversal 10 hops.

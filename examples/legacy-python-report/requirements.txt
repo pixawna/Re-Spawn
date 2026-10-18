@@ -1,0 +1,1 @@
+# Original: no third-party dependency. distutils was bundled with Python <=3.11.

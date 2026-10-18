@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from ..graph import client, planner, queries as Q, dependencies
 from ..recovery import executor, inspector, verifier
+from ..recovery.adapters import get_adapter
 
 
 class RecoverySession:
@@ -31,13 +32,20 @@ class RecoverySession:
             )
         self.directory = o.DATA / "runs" / run.id
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.info = inspector.inspect(self.source)
+        self.adapter = get_adapter(self.source)
+        self.info = self.adapter.inspect(self.source)
         rows = client.run(
-            "MATCH (:Project {id:$id})-[:RUNS_ON]->(r:Runtime) RETURN r",
+            "MATCH (:Project {id:$id})-[:RUNS_ON]->(r:Environment) RETURN r",
             {"id": self.pid},
             tag="inspect",
         )
-        self.runtime = rows[0]["r"] if rows else {"major": 22, "id": "node@22"}
+        if not rows:
+            raise ValueError("Project has no registered execution environment")
+        self.runtime = rows[0]["r"]
+        self.run.execution_environment = dict(self.runtime)
+        self.run.execution_runtime = str(
+            self.runtime.get("version", self.runtime.get("major", ""))
+        )
         self.diagnosed = False
         self.attempts = []
         self.signatures = []
@@ -78,7 +86,9 @@ class RecoverySession:
             result = methods[name](**args)
             self.run.emit("tool", tool=name, args=args, status="done", result=result)
             if result.get("terminal"):
-                self.run.emit("done",status=self.run.status,certificate=self.run.certificate)
+                self.run.emit(
+                    "done", status=self.run.status, certificate=self.run.certificate
+                )
             return result
         finally:
             self.lock.release()
@@ -92,25 +102,37 @@ class RecoverySession:
         client.run(
             Q.SET_STATUS, {"id": self.pid, "status": "diagnosing"}, tag="inspect"
         )
+        if not self.info["scripts"]["build"]:
+            r.status = "unverified"
+            client.run(
+                Q.SET_STATUS, {"id": self.pid, "status": "unverified"}, tag="inspect"
+            )
+            r.emit(
+                "unsupported",
+                message="No supported build entry point was found. Python recovery currently requires build.py and unittest tests; the project has not been declared broken.",
+            )
+            return {"terminal": True, "status": "unverified"}
         baseline = executor.fresh_workspace(self.source, self.directory / "baseline")
         sink = o._sink(r, "baseline")
-        installed = executor.install(baseline, sink, node_major=self.runtime["major"])
-        self.run.emit("dependencies", **dependencies.import_lock(self.pid, baseline))
+        installed = self.adapter.run("install", baseline, sink, self.runtime)
+        self.run.emit(
+            "dependencies", **self.adapter.import_dependencies(self.pid, baseline)
+        )
         result = (
-            executor.build(baseline, sink, node_major=self.runtime["major"])
+            self.adapter.run("build", baseline, sink, self.runtime)
             if installed["code"] == 0 and self.info["scripts"]["build"]
             else installed
         )
         self.diagnosed = True
         self.signatures = client.run(
-            "MATCH (p:Project {id:$id})-[:USES]->(pv:PackageVersion)-[i:INCOMPATIBLE_WITH]->(rt:Runtime)<-[:RUNS_ON]-(p) RETURN pv.id AS package,rt.id AS runtime,i.signature AS signature,i.reason AS reason",
+            "MATCH (p:Project {id:$id})-[:USES]->(pv:Artifact)-[i:INCOMPATIBLE_WITH]->(rt:Environment)<-[:RUNS_ON]-(p) RETURN pv.id AS package,rt.id AS runtime,i.signature AS signature,i.reason AS reason",
             {"id": self.pid},
             tag="classify",
         )
         if result["code"] == 0 and self.info["scripts"]["build"]:
             r.emit("diagnosis", alive=True, step="build", code=0)
             tests = (
-                executor.test(baseline, sink, node_major=self.runtime["major"])
+                self.adapter.run("test", baseline, sink, self.runtime)
                 if self.info["scripts"]["test"]
                 else {"code": 0, "output": ""}
             )
@@ -127,12 +149,17 @@ class RecoverySession:
                 [],
             )
             return {"terminal": True, "status": r.status}
-        failure = verifier.classify(result["output"], self.signatures)
+        failure = self.adapter.classify(result["output"], self.signatures)
         r.emit(
             "diagnosis",
             alive=False,
             step="install" if installed["code"] else "build",
             code=result["code"],
+            command=(
+                ("pip install" if self.adapter.ecosystem == "pypi" else "npm install")
+                if installed["code"]
+                else self.info["scripts"]["build"]
+            ),
             error=failure,
             excerpt=o._excerpt(result["output"], failure.get("match", "")),
         )
@@ -257,29 +284,31 @@ class RecoverySession:
             r.active_step = step
             r.emit("graph")
             m = planner._migration(step)
-            out = executor.apply_recipe(ws, m["recipe"])
+            out = self.adapter.apply_recipe(ws, m["recipe"])
+            r.modified_files.update(out.get("files", []))
             runtime_override = out["runtime"] or runtime_override
             r.emit("applied", migration=step, title=m["title"], recipe=m["recipe"])
         r.active_step = None
         rt = o._runtime_for(runtime_override) if runtime_override else self.runtime
         node_path = rt.get("path") or None
         node_major = runtime_override or self.runtime["major"]
-        r.execution_runtime = str(node_major)
+        r.execution_environment = dict(rt)
+        r.execution_runtime = str(rt.get("version", node_major))
         sink = o._sink(r, f"attempt-{n}")
-        result = executor.install(ws, sink, node_path=node_path, node_major=node_major)
+        result = self.adapter.run("install", ws, sink, rt)
         stage = "install"
         if result["code"] == 0 and self.info["scripts"]["build"]:
             stage = "build"
-            result = executor.build(
-                ws, sink, node_path=node_path, node_major=node_major
-            )
+            result = self.adapter.run("build", ws, sink, rt)
         tests = {"code": 0, "output": ""}
         if result["code"] == 0 and self.info["scripts"]["test"]:
             stage = "test"
-            tests = executor.test(ws, sink, node_path=node_path, node_major=node_major)
+            tests = self.adapter.run("test", ws, sink, rt)
             if tests["code"] != 0:
                 result = tests
-        patch = executor.diff(self.source, ws)
+        patch = executor.diff(
+            self.source, ws, self.adapter.patch_files(self.source, ws, r.modified_files)
+        )
         r.emit("patch", n=n, diff=patch)
         if result["code"] == 0 and self.info["scripts"]["build"]:
             r.patch = patch
@@ -304,7 +333,7 @@ class RecoverySession:
                 self.attempts,
             )
             return {"terminal": True, "status": r.status, "certificate": r.certificate}
-        failure = verifier.classify(result["output"], self.signatures)
+        failure = self.adapter.classify(result["output"], self.signatures)
         self.attempts.append(
             {
                 "n": n,

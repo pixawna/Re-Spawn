@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import Pixel from "./Pixel";
 import Heartbeat from "./Heartbeat";
 import { crt, heart, reaper, skull, tombstoneCracked } from "@/lib/sprites";
-import { api, assetUrl, replay, type Certificate } from "@/lib/api";
+import {
+  api,
+  assetUrl,
+  replay,
+  environmentLabel,
+  type Certificate,
+} from "@/lib/api";
 
 function certificateSvg(c: Certificate) {
   const esc = (s: string) =>
@@ -37,7 +43,7 @@ function certificateSvg(c: Certificate) {
 <text x="40" y="58" class="s">Resurrection certificate · ${esc(c.run)}</text>
 <text x="40" y="96" class="h">${esc(c.project)}</text>
 <text x="40" y="120" class="s">${esc(c.owner)} · issued ${esc(c.issued)}</text>
-<rect x="40" y="140" width="340" height="120" fill="#120c22"/><text x="60" y="190" class="b g">${c.status === "alive" ? "Alive" : "Build passing"} on Node ${esc(c.node.replace(/^v/, ""))}</text>
+<rect x="40" y="140" width="340" height="120" fill="#120c22"/><text x="60" y="190" class="b g">${c.status === "alive" ? "Alive" : "Build passing"} on ${esc(environmentLabel(c.environment ?? { kind: "node", version: c.node.replace(/^v/, "") }))}</text>
 <text x="60" y="216" class="b">${c.tests.passed} tests passing · HTTP smoke ${smokeOk ? "passed" : "incomplete / failed"}</text>
 <text x="60" y="240" class="s">${c.attempts.length} route${c.attempts.length === 1 ? "" : "s"} tried · ${c.duration}s · ${esc(c.graph)}</text>
 <text x="40" y="292" class="s">Dependency</text><text x="210" y="292" class="s">Before</text><text x="300" y="292" class="s">After</text>${rows}
@@ -199,7 +205,14 @@ export default function Resurrection({
             </div>
             <div>
               <dt>Runtime</dt>
-              <dd>Node {cert.node.replace("v", "")}</dd>
+              <dd>
+                {environmentLabel(
+                  cert.environment ?? {
+                    kind: "node",
+                    version: cert.node.replace(/^v/, ""),
+                  },
+                )}
+              </dd>
             </div>
           </dl>
           <h3>What changed</h3>
@@ -281,7 +294,7 @@ export default function Resurrection({
               {cert.status === "alive" && cert.source.startsWith("git:") && (
                 <>
                   <p>
-                    Create a draft PR with the verified package changes and
+                    Create a draft PR with the verified project changes and
                     decision trace in {cert.owner}/{cert.project}.
                   </p>
                   <button
