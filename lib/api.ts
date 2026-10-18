@@ -1,5 +1,6 @@
 export const API = (
-  process.env.NEXT_PUBLIC_RESPAWN_API || "http://localhost:8000"
+  process.env.NEXT_PUBLIC_RESPAWN_API ||
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000")
 ).replace(/\/$/, "");
 
 export type Status =
