@@ -78,7 +78,7 @@ export default function ProjectPicker() {
         </p>
         {offline && (
           <p className="callout bad" role="alert">
-            The backend isn&apos;t running. Start it with <code>npm run api</code> and refresh.
+            The repair service is unavailable or waking up. Please wait a minute, then refresh.
           </p>
         )}
         <ul className="project-grid">
@@ -108,7 +108,9 @@ export default function ProjectPicker() {
           {projects === null && <li className="pc-loading">Loading projects…</li>}
         </ul>
 
-        <details className="dig-panel">
+        {process.env.NEXT_PUBLIC_RESPAWN_EXAMPLES_ONLY === "1" ? (
+          <p className="callout">This free hosted demo runs the three bundled projects. Graph memory and reports reset when the service restarts. Repository imports are available in the Docker server setup.</p>
+        ) : <details className="dig-panel">
           <summary>Or try your own GitHub repository</summary>
           <form onSubmit={dig}>
             <label htmlFor="repo">Public repository URL</label>
@@ -133,7 +135,7 @@ export default function ProjectPicker() {
                 "npm and Python projects. Re:Spawn repairs failures its graph knows about and tells you honestly when it doesn't."}
             </p>
           </form>
-        </details>
+        </details>}
       </main>
     </div>
   );

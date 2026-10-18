@@ -74,7 +74,14 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Re:Spawn", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        origin.strip().rstrip("/")
+        for origin in os.getenv(
+            "RESPAWN_ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
+        if origin.strip()
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -137,6 +144,11 @@ class NewProject(BaseModel):
 
 @app.post("/api/projects")
 def add_project(body: NewProject):
+    if os.getenv("RESPAWN_EXAMPLES_ONLY") == "1":
+        raise HTTPException(
+            403,
+            "This hosted demo runs the three bundled projects. Repository imports require the Docker server deployment.",
+        )
     m = re.match(
         r"^https://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", body.url.strip()
     )
@@ -182,6 +194,18 @@ def resurrect(pid: str, body: StartRun = StartRun()):
     if not orch.get_project(pid):
         raise HTTPException(404, "Unknown project")
     with _start_lock:
+        if os.getenv("RESPAWN_EXAMPLES_ONLY") == "1":
+            if pid not in {e["id"] for e in EXAMPLE_PROJECTS}:
+                raise HTTPException(
+                    403, "Only bundled examples are enabled on this host"
+                )
+            if any(
+                r.project_id != pid and r.status in ("running", "awaiting_approval")
+                for r in orch.RUNS.values()
+            ):
+                raise HTTPException(
+                    409, "Another demo is running. Please try again when it finishes."
+                )
         current = orch.RUNS.get(orch.LATEST.get(pid, ""))
         if current and current.status in ("running", "awaiting_approval"):
             return current.to_dict()

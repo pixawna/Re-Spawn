@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: respawn-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile.demo
+    healthCheckPath: /api/health
+    envVars:
+      - key: RESPAWN_ALLOWED_ORIGINS
+        sync: false
+      - key: RESPAWN_AGENT_MODE
+        value: deterministic
+      - key: RESPAWN_EXAMPLES_ONLY
+        value: "1"

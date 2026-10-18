@@ -1,0 +1,14 @@
+**
+!backend/
+!backend/**
+!examples/
+!examples/**
+!deploy/
+!deploy/Dockerfile.api
+!deploy/Dockerfile.demo
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+**/.venv/
+**/.env*
+**/.git/

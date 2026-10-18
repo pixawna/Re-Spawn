@@ -1,0 +1,17 @@
+FROM node:22-bookworm-slim AS node
+FROM python:3.12-slim-bookworm
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+WORKDIR /app
+COPY backend/requirements.txt backend/requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+ && pip install --no-cache-dir -r backend/requirements.txt falkordblite \
+ && apt-get purge -y build-essential && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+COPY backend backend
+COPY examples examples
+ENV PYTHONUNBUFFERED=1 RESPAWN_SANDBOX=local RESPAWN_FALKORDB=embedded RESPAWN_EXAMPLES_ONLY=1 RESPAWN_DATA=/tmp/respawn RESPAWN_AGENT_MODE=deterministic
+EXPOSE 8000
+CMD ["sh", "-c", "exec python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

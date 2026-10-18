@@ -1,0 +1,54 @@
+services:
+  graph:
+    image: falkordb/falkordb:latest
+    restart: unless-stopped
+    volumes:
+      - graph-data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      FALKORDB_HOST: graph
+      RESPAWN_FALKORDB: server
+      RESPAWN_SANDBOX: docker
+      RESPAWN_DATA: /srv/respawn/data
+      RESPAWN_ALLOWED_ORIGINS: ${FRONTEND_ORIGIN:?Set the Vercel frontend origin}
+      RESPAWN_AGENT_MODE: deterministic
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Must match host path: sibling sandbox containers bind-mount these files.
+      - /srv/respawn/data:/srv/respawn/data
+    depends_on:
+      graph:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set the backend domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  graph-data:
+  caddy-data:
+  caddy-config:

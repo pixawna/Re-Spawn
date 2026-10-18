@@ -1,0 +1,12 @@
+backend/
+examples/
+tests/
+replay/
+scripts/
+docs/
+.venv/
+.replay-*/
+.env*
+*.tgz
+recordings.json
+deploy/
