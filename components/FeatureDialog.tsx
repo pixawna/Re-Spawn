@@ -6,16 +6,19 @@ export default function FeatureDialog({
   onClose,
   children,
   className = "",
+  inline = false,
 }: {
   title: string;
   kicker: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  inline?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
+    if (inline) return;
     const dialog = ref.current;
     const previous = document.activeElement as HTMLElement | null;
     dialog?.showModal();
@@ -23,7 +26,19 @@ export default function FeatureDialog({
       dialog?.close();
       previous?.focus();
     };
-  }, []);
+  }, [inline]);
+  if (inline)
+    return (
+      <section className={`feature-dialog feature-inline ${className}`} aria-labelledby={titleId}>
+        <header className="feature-heading">
+          <div>
+            <p className="feature-kicker">{kicker}</p>
+            <h2 id={titleId}>{title}</h2>
+          </div>
+        </header>
+        {children}
+      </section>
+    );
   return (
     <dialog
       ref={ref}

@@ -17,6 +17,8 @@ import Investigation, { type WhyChain } from "./Investigation";
 import Heartbeat, { type Pulse } from "./Heartbeat";
 import Resurrection from "./Resurrection";
 import Pixel from "./Pixel";
+import Link from "next/link";
+import Stepper from "./Stepper";
 import { reaper, shovel, type Mood } from "@/lib/sprites";
 import {
   api,
@@ -64,7 +66,36 @@ function recipeText(op: Record<string, string>) {
   return JSON.stringify(op);
 }
 
-export default function ReSpawn() {
+// What the user should understand right now, in plain words.
+function guideFor(opts: {
+  running: boolean;
+  phase: string | null;
+  status: string;
+  done: boolean;
+  lastSay: string | null;
+  awaiting: boolean;
+}) {
+  const { running, phase, status, done, lastSay, awaiting } = opts;
+  if (awaiting) return { title: "Your approval is needed", text: "The cheapest route is risky. Review it in the panel on the right and approve or reject it." };
+  if (running) {
+    const titles: Record<string, string> = {
+      diagnose: "Step 1 of 4 · Reproducing the failure",
+      discover: "Step 2 of 4 · Asking the graph for a route",
+      repair: "Step 3 of 4 · Trying the repair in a sandbox",
+      verify: "Step 4 of 4 · Proving it works",
+    };
+    return { title: titles[phase ?? "diagnose"] ?? "Working…", text: lastSay ?? "Mori is getting started." };
+  }
+  if (done && (status === "alive" || status === "build-passing"))
+    return { title: "It's alive", text: "The app builds, its tests pass and it serves again. Read the report to see every decision and the graph facts behind it." };
+  if (done && status === "dead")
+    return { title: "This one stays buried for now", text: lastSay ?? "Every route the graph knows was tried. The report explains what failed and why." };
+  if (status === "alive")
+    return { title: "Already resurrected", text: "Press Resurrect again to replay it. The agent reuses what the graph learned last time." };
+  return { title: "Ready when you are", text: "Press Resurrect. Mori will first run the original build to capture the real error, then ask the graph for the safest fix." };
+}
+
+export default function ReSpawn({ initialProject }: { initialProject?: string } = {}) {
   const [reportRunId, setReportRunId] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -76,7 +107,7 @@ export default function ReSpawn() {
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [rules, setRules] = useState<Rules | null>(null);
-  const [view, setView] = useState<"graveyard" | "map">("graveyard");
+  const [view, setView] = useState<"graveyard" | "map">(initialProject ? "map" : "graveyard");
   const [selected, setSelected] = useState<string | null>(null);
   const [map, setMap] = useState<GraphMap | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -93,6 +124,7 @@ export default function ReSpawn() {
   const [digging, setDigging] = useState(false);
   const [notice, setNotice] = useState("");
   const esRef = useRef<EventSource | null>(null);
+  const openRef = useRef<((pid: string, list?: Project[]) => void) | null>(null);
   const mapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -125,7 +157,10 @@ export default function ReSpawn() {
 
   useEffect(() => {
     api<Project[]>("/api/projects")
-      .then(setProjects)
+      .then((list) => {
+        setProjects(list);
+        if (initialProject && list.some((p) => p.id === initialProject)) openRef.current?.(initialProject, list);
+      })
       .catch(() => setOffline(true));
     api<Health>("/api/health")
       .then(setHealth)
@@ -133,7 +168,7 @@ export default function ReSpawn() {
     api<Rules>("/api/rules")
       .then(setRules)
       .catch(() => {});
-  }, []);
+  }, [initialProject]);
 
   const subscribe = useCallback(
     (rid: string, pid: string) => {
@@ -183,7 +218,7 @@ export default function ReSpawn() {
   useEffect(() => () => esRef.current?.close(), []);
 
   const open = useCallback(
-    (pid: string) => {
+    (pid: string, list?: Project[]) => {
       setSelected(pid);
       setChain(null);
       setHighlightIds([]);
@@ -192,7 +227,7 @@ export default function ReSpawn() {
       setMap(null);
       selectedRef.current = pid;
       loadMap(pid, true);
-      const p = projects.find((x) => x.id === pid);
+      const p = (list ?? projects).find((x) => x.id === pid);
       if (p?.run && pid !== runningProject) {
         if (["running", "awaiting_approval"].includes(p.run.status))
           subscribe(p.run.id, pid);
@@ -218,6 +253,10 @@ export default function ReSpawn() {
     },
     [loadMap, projects, runningProject, subscribe],
   );
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   const resurrect = async () => {
     if (!selected) return;
@@ -295,6 +334,10 @@ export default function ReSpawn() {
   };
 
   const project = projects.find((p) => p.id === selected) || null;
+  const lastSay = [...events].reverse().find((e) => e.type === "say" || e.type === "decision");
+  const awaiting =
+    events.some((e) => e.type === "approval_required") &&
+    !events.some((e) => e.type === "approval_resolved" && e.approval_id === [...events].reverse().find((x) => x.type === "approval_required")?.id);
   const running = !!runningProject && runningProject === selected;
   const status = project?.status || "unverified";
   const pulse: Pulse =
@@ -452,13 +495,19 @@ export default function ReSpawn() {
           {project && (
             <>
               <div className="soil-bar">
-                <button
-                  className="climb"
-                  onClick={() => setView("graveyard")}
-                  aria-label="Back to the graveyard"
-                >
-                  ↑ Graveyard
-                </button>
+                {initialProject ? (
+                  <Link className="climb" href="/projects" aria-label="Back to all projects">
+                    ← All projects
+                  </Link>
+                ) : (
+                  <button
+                    className="climb"
+                    onClick={() => setView("graveyard")}
+                    aria-label="Back to the graveyard"
+                  >
+                    ↑ Graveyard
+                  </button>
+                )}
                 <div className="soil-title">
                   <h2>
                     {project.name}{" "}
@@ -472,63 +521,47 @@ export default function ReSpawn() {
                 </div>
                 <Heartbeat pulse={pulse} />
                 <div className="soil-actions">
-                  {!replay() && (
-                    <label className="agent-select">
-                      Controller
-                      <select
-                        aria-label="Agent controller"
-                        value={agentMode}
-                        onChange={(e) => setAgentMode(e.target.value)}
-                        disabled={running}
-                      >
-                        <option value="auto">
-                          Auto ·{" "}
-                          {health?.agent?.claude_available
-                            ? "Claude + MCP"
-                            : "graph fallback"}
-                        </option>
-                        <option value="claude">Claude + MCP</option>
-                        <option value="deterministic">
-                          Deterministic graph
-                        </option>
-                      </select>
-                    </label>
-                  )}
-                  <button
-                    className="btn-ghost"
-                    onClick={() => setLearnProject(project)}
-                  >
-                    ◇ Learn mode
-                  </button>
-                  {!replay() && (
-                    <button
-                      className="btn-ghost"
-                      onClick={() => {
-                        if (runId) {
-                          setReportRunId(runId);
-                          setShowReport(true);
-                        } else setShowArchive(true);
-                      }}
-                    >
-                      Resurrection report
-                    </button>
-                  )}
-                  {!replay() && (
-                    <button
-                      className="j-link"
-                      onClick={() => setShowArchive(true)}
-                    >
-                      Past reports
-                    </button>
-                  )}
-                  {cert && !running && (
-                    <button
-                      className="btn-ghost"
-                      onClick={() => setShowCert(true)}
-                    >
-                      Certificate
-                    </button>
-                  )}
+                  <details className="more-menu">
+                    <summary>More</summary>
+                    <div className="more-pop">
+                      {!replay() && (
+                        <label className="agent-select">
+                          Who drives the agent
+                          <select
+                            aria-label="Agent controller"
+                            value={agentMode}
+                            onChange={(e) => setAgentMode(e.target.value)}
+                            disabled={running}
+                          >
+                            <option value="auto">
+                              Auto ·{" "}
+                              {health?.agent?.claude_available ? "Claude + MCP" : "graph fallback"}
+                            </option>
+                            <option value="claude">Claude + MCP</option>
+                            <option value="deterministic">Deterministic graph</option>
+                          </select>
+                        </label>
+                      )}
+                      <button className="btn-ghost" onClick={() => setLearnProject(project)}>
+                        Learn mode (mini-game)
+                      </button>
+                      {!replay() && (
+                        <button className="btn-ghost" onClick={() => setShowArchive(true)}>
+                          Past reports
+                        </button>
+                      )}
+                      {cert && !running && (
+                        <button className="btn-ghost" onClick={() => setShowCert(true)}>
+                          Certificate
+                        </button>
+                      )}
+                    </div>
+                  </details>
+                  {runId && done && !replay() ? (
+                    <Link className="btn-ghost" href={`/report?run=${encodeURIComponent(runId)}&p=${encodeURIComponent(project.id)}`}>
+                      Read the report
+                    </Link>
+                  ) : null}
                   <button
                     className="btn-life"
                     onClick={resurrect}
@@ -542,6 +575,19 @@ export default function ReSpawn() {
                   </button>
                 </div>
               </div>
+              {(() => {
+                const g = guideFor({ running, phase, status, done, lastSay: lastSay ? String(lastSay.text) : null, awaiting });
+                return (
+                  <div className={`guide ${running ? "is-live" : done && status === "alive" ? "is-good" : ""}`} role="status" aria-live="polite">
+                    <Pixel sprite={reaper(running ? mood : status === "alive" ? "happy" : "neutral")} scale={2} />
+                    <div className="guide-text">
+                      <strong>{g.title}</strong>
+                      <span>{g.text}</span>
+                    </div>
+                    {initialProject && <Stepper current={done && runId ? 3 : 2} />}
+                  </div>
+                );
+              })()}
               <div className="soil-grid">
                 <div className="map-wrap">
                   {displayMap ? (

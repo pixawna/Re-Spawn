@@ -333,7 +333,9 @@ export default function GraveyardScene({
             ? tombstoneCracked
             : tombstone;
         const isSel = selected === p.id;
-        const label = p.name.length > 16 ? p.name.slice(0, 15) + "…" : p.name;
+        // Short labels so neighbouring graves never overlap (the full name is in the hover card and aria-label).
+        const short = p.name.replace(/^legacy-/, "");
+        const label = short.length > 11 ? short.slice(0, 10) + "…" : short;
         return (
           <g
             key={p.id}

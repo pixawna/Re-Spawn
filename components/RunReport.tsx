@@ -105,9 +105,11 @@ function describe(entry: Entry) {
 export default function RunReport({
   runId,
   onClose,
+  inline = false,
 }: {
   runId: string;
   onClose: () => void;
+  inline?: boolean;
 }) {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
@@ -144,6 +146,7 @@ export default function RunReport({
       kicker="Resurrection report"
       onClose={onClose}
       className="report-dialog"
+      inline={inline}
     >
       {!report && !error && <p role="status">Gathering recorded evidence…</p>}
       {error && (

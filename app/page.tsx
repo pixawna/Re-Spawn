@@ -1,5 +1,5 @@
-import ReSpawn from "@/components/ReSpawn";
+import Welcome from "@/components/Welcome";
 
 export default function Home() {
-  return <ReSpawn />;
+  return <Welcome />;
 }
