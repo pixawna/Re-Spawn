@@ -1,3 +1,5 @@
+![Re:Spawn welcome screen showing the graveyard and resurrection workflow](docs/images/respawn-welcome.png)
+
 # Re:Spawn
 
 **A graph-powered agent that finds and runs verified migration paths to bring broken software back to life.**
