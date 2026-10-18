@@ -34,7 +34,7 @@ const res = await build({
   format: "iife",
   jsx: "automatic",
   target: "es2020",
-  alias: { "@": root },
+  alias: { "@": root, "next/link": path.join(root, "replay/router.tsx"), "next/navigation": path.join(root, "replay/router.tsx") },
   define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_RESPAWN_API": '""' },
   logLevel: "warning",
 });
@@ -44,7 +44,7 @@ const rec = fs.readFileSync(recPath, "utf8").replace(/</g, "\\u003c");
 
 // Written as page content (no html/head/body): hosts like claude.ai artifacts wrap it in a skeleton.
 const html = `<title>Re:Spawn</title>
-<meta name="description" content="Replay of real Re:Spawn runs: a FalkorDB-guided agent resurrecting a broken webpack 4 app.">
+<meta name="description" content="Replay of real Re:Spawn runs: a FalkorDB-guided agent resurrecting three broken projects.">
 <style>:root{color-scheme:dark}${css}</style>
 <div id="root"></div>
 <script type="application/json" id="recordings">${rec}</script>

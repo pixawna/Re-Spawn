@@ -18,6 +18,7 @@ import Heartbeat, { type Pulse } from "./Heartbeat";
 import Resurrection from "./Resurrection";
 import Pixel from "./Pixel";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Stepper from "./Stepper";
 import { reaper, shovel, type Mood } from "@/lib/sprites";
 import {
@@ -96,6 +97,7 @@ function guideFor(opts: {
 }
 
 export default function ReSpawn({ initialProject }: { initialProject?: string } = {}) {
+  const router = useRouter();
   const [reportRunId, setReportRunId] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -410,8 +412,27 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
   }, [node, displayMap]);
 
   return (
-    <div className={`world view-${view}`}>
-      <div className="camera">
+    <div className={initialProject ? "page workbench" : `world view-${view}`}>
+      {initialProject && (
+        <header className="page-top">
+          <Link href="/" className="mini-mark" aria-label="Re:Spawn home">
+            re<span>:</span>spawn
+          </Link>
+          <span className="graph-chip inline-chip" title={health?.graph.detail}>
+            <span className={`dot ${offline ? "off" : "on"}`} />
+            {offline
+              ? "Backend offline. Start it on :8000"
+              : health?.graph.mode === "replay"
+                ? "Replaying real recorded runs"
+                : health
+                  ? `FalkorDB live · ${Object.values(health.stats).reduce((a, b) => a + b, 0)} graph nodes`
+                  : "Connecting to FalkorDB"}
+          </span>
+          <Stepper current={done && runId ? 3 : 2} />
+        </header>
+      )}
+      <div className={initialProject ? "bench" : "camera"}>
+        {!initialProject && (
         <section className="layer-sky" aria-label="Graveyard">
           <GraveyardScene
             projects={projects}
@@ -486,6 +507,7 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
             </form>
           )}
         </section>
+        )}
 
         <section
           className="layer-soil"
@@ -557,7 +579,7 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
                       )}
                     </div>
                   </details>
-                  {runId && done && !replay() ? (
+                  {runId && done ? (
                     <Link className="btn-ghost" href={`/report?run=${encodeURIComponent(runId)}&p=${encodeURIComponent(project.id)}`}>
                       Read the report
                     </Link>
@@ -584,7 +606,6 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
                       <strong>{g.title}</strong>
                       <span>{g.text}</span>
                     </div>
-                    {initialProject && <Stepper current={done && runId ? 3 : 2} />}
                   </div>
                 );
               })()}
@@ -711,6 +732,27 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
                 </div>
                 <div className="journal-stack">
                   <Journal events={events} phase={phase} done={done} />
+                  {!initialProject && (
+                    <Investigation
+                      key={`${project.id}:${runId ?? "idle"}`}
+                      projectId={project.id}
+                      runId={runId}
+                      events={events}
+                      onChain={setChain}
+                      onHighlight={setHighlightIds}
+                    />
+                  )}
+                </div>
+              </div>
+              {initialProject && (
+                <section className="bench-ask" aria-labelledby="ask-title">
+                  <div className="bench-ask-head">
+                    <h3 id="ask-title">Question the graph</h3>
+                    <p>
+                      Why did Mori pick this route? Which facts ruled the others out? Ask here and the
+                      matching nodes light up on the map above.
+                    </p>
+                  </div>
                   <Investigation
                     key={`${project.id}:${runId ?? "idle"}`}
                     projectId={project.id}
@@ -719,8 +761,8 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
                     onChain={setChain}
                     onHighlight={setHighlightIds}
                   />
-                </div>
-              </div>
+                </section>
+              )}
               {notice && (
                 <p
                   className="notice"
@@ -770,8 +812,8 @@ export default function ReSpawn({ initialProject }: { initialProject?: string } 
           onClose={() => setShowCert(false)}
           onReport={() => {
             setShowCert(false);
-            setReportRunId(runId);
-            setShowReport(true);
+            if (runId && project)
+              router.push(`/report?run=${encodeURIComponent(runId)}&p=${encodeURIComponent(project.id)}`);
           }}
         />
       )}

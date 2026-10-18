@@ -2749,3 +2749,129 @@ a.btn-life {
     grid-template-columns: 44px 24px 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ workbench (/resurrect page)
+   The resurrect page is its own screen: a page header, the run controls, the map beside the
+   agent's console, and a full-width "question the graph" panel underneath. No camera moves. */
+.workbench {
+  display: flex;
+  flex-direction: column;
+}
+.workbench .page-top {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 20;
+  background: var(--night);
+}
+.inline-chip {
+  position: static;
+  margin-right: auto;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+.bench {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.workbench .layer-soil {
+  position: relative;
+  top: auto;
+  height: auto;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition: none;
+  flex: 1;
+  padding-bottom: 28px;
+}
+.workbench .soil-bar {
+  max-width: 1480px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 22px max(16px, 2vw) 14px;
+}
+.workbench .guide {
+  max-width: calc(1480px - 2 * max(16px, 2vw));
+  width: calc(100% - 2 * max(16px, 2vw));
+  margin: 0 auto 16px;
+}
+.workbench .soil-grid {
+  max-width: 1480px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 max(16px, 2vw);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  height: clamp(480px, 68vh, 760px);
+  flex: none;
+}
+.workbench .journal-stack {
+  overflow: hidden;
+}
+.workbench .journal-stack .journal {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.bench-ask {
+  position: relative;
+  z-index: 1;
+  max-width: calc(1480px - 2 * max(16px, 2vw));
+  width: calc(100% - 2 * max(16px, 2vw));
+  margin: 22px auto 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  padding: 22px;
+  background: rgba(18, 12, 34, 0.72);
+  border: 3px solid #2e2257;
+  clip-path: var(--notch);
+}
+.bench-ask-head h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  color: var(--moon);
+}
+.bench-ask-head p {
+  margin: 0;
+  color: var(--mist);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.bench-ask .investigation {
+  max-height: none;
+  min-width: 0;
+}
+.workbench .soil-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 980px) {
+  .workbench .soil-bar {
+    grid-template-columns: auto 1fr;
+  }
+  .workbench .soil-bar .heartbeat {
+    display: none;
+  }
+  .workbench .soil-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  .workbench .soil-grid {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .workbench .map-wrap {
+    height: 60vh;
+    min-height: 420px;
+  }
+  .workbench .journal-stack .journal {
+    height: 420px;
+  }
+  .bench-ask {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inline-chip {
+    display: none;
+  }
+}

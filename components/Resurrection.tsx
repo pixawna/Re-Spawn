@@ -250,13 +250,18 @@ export default function Resurrection({
           </ol>
           <div className="card-actions">
             {hosted ? (
-              <button
-                className="btn-ghost"
-                onClick={() => setShowPatch((v) => !v)}
-                aria-expanded={showPatch}
-              >
-                {showPatch ? "Hide patch" : "View patch"}
-              </button>
+              <>
+                <button className="btn-life" onClick={onReport}>
+                  Read the report
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setShowPatch((v) => !v)}
+                  aria-expanded={showPatch}
+                >
+                  {showPatch ? "Hide patch" : "View patch"}
+                </button>
+              </>
             ) : (
               <>
                 <button className="btn-ghost" onClick={onReport}>
