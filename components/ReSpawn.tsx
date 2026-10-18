@@ -7,7 +7,7 @@ import Heartbeat, { type Pulse } from "./Heartbeat";
 import Resurrection from "./Resurrection";
 import Pixel from "./Pixel";
 import { reaper, shovel, type Mood } from "@/lib/sprites";
-import { api, API, type Certificate, type GraphMap, type MapNode, type Project, type Rules, type RunEvent } from "@/lib/api";
+import { api, API, replay, type Certificate, type GraphMap, type MapNode, type Project, type Rules, type RunEvent } from "@/lib/api";
 
 type Health = { graph: { mode: string; detail: string }; stats: Record<string, number> };
 
@@ -102,7 +102,8 @@ export default function ReSpawn() {
       setDone(false);
       setRunId(rid);
       setRunningProject(pid);
-      const es = new EventSource(`${API}/api/runs/${rid}/events`);
+      const ES = replay()?.EventSource ?? EventSource;
+      const es = new ES(`${API}/api/runs/${rid}/events`);
       esRef.current = es;
       es.onmessage = (msg) => {
         const ev = JSON.parse(msg.data) as RunEvent;
@@ -117,6 +118,7 @@ export default function ReSpawn() {
           setRunningProject(null);
           loadMap(pid, true);
           loadProjects();
+          api<Rules>("/api/rules").then(setRules).catch(() => {});
           if (ev.status === "alive" || ev.status === "build-passing") {
             setMood("happy");
             setCert(ev.certificate as Certificate);
@@ -273,7 +275,9 @@ export default function ReSpawn() {
             <span className={`dot ${offline ? "off" : "on"}`} />
             {offline
               ? "Backend offline. Start it on :8000"
-              : health
+              : health?.graph.mode === "replay"
+                ? "Replaying real recorded runs"
+                : health
                 ? `FalkorDB ${health.graph.mode} · ${Object.values(health.stats).reduce((a, b) => a + b, 0)} nodes`
                 : "Connecting to FalkorDB"}
           </div>

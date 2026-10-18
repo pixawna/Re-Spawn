@@ -1454,6 +1454,16 @@ pre {
   gap: 8px;
   margin-top: 18px;
 }
+.card-patch {
+  margin: 12px 0 0;
+  padding: 10px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--ink);
+  font-size: 11px;
+  color: #d8ffdc;
+  white-space: pre-wrap;
+}
 .card-actions .btn-ghost,
 .card-actions .btn-life {
   font-size: 14px;

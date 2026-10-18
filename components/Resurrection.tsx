@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Pixel from "./Pixel";
 import Heartbeat from "./Heartbeat";
 import { crt, heart, reaper, skull, tombstoneCracked } from "@/lib/sprites";
-import { API, type Certificate } from "@/lib/api";
+import { assetUrl, replay, type Certificate } from "@/lib/api";
 
 function certificateSvg(c: Certificate) {
   const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
@@ -27,6 +27,8 @@ function certificateSvg(c: Certificate) {
 }
 
 export default function Resurrection({ cert, onClose }: { cert: Certificate; onClose: () => void }) {
+  const hosted = replay();
+  const [showPatch, setShowPatch] = useState(false);
   const [stage, setStage] = useState<"crack" | "rise" | "on">(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "on" : "crack",
   );
@@ -58,7 +60,7 @@ export default function Resurrection({ cert, onClose }: { cert: Certificate; onC
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
 
-  const preview = cert.preview ? API + cert.preview : null;
+  const preview = cert.preview ? assetUrl(cert.preview) : null;
   const changed = Object.keys({ ...cert.before, ...cert.after }).filter((k) => cert.before[k] !== cert.after[k]);
 
   return (
@@ -80,7 +82,11 @@ export default function Resurrection({ cert, onClose }: { cert: Certificate; onC
           <Pixel sprite={crt} scale={22} />
           <div className="rez-screen">
             {stage === "on" && preview ? (
-              <iframe src={preview} title={`${cert.project}, running again`} />
+              hosted && cert.preview ? (
+                <iframe srcDoc={hosted.text(cert.preview)} title={`${cert.project}, running again`} />
+              ) : (
+                <iframe src={preview} title={`${cert.project}, running again`} />
+              )
             ) : (
               <span className="boot">booting…</span>
             )}
@@ -139,18 +145,27 @@ export default function Resurrection({ cert, onClose }: { cert: Certificate; onC
             ))}
           </ol>
           <div className="card-actions">
-            <button className="btn-life" onClick={download}>
-              Download certificate
-            </button>
-            <a className="btn-ghost" href={`${API}/api/runs/${cert.run}/patch`} target="_blank" rel="noreferrer">
-              View patch
-            </a>
-            {preview && (
-              <a className="btn-ghost" href={preview} target="_blank" rel="noreferrer">
-                Open the app
-              </a>
+            {hosted ? (
+              <button className="btn-ghost" onClick={() => setShowPatch((v) => !v)} aria-expanded={showPatch}>
+                {showPatch ? "Hide patch" : "View patch"}
+              </button>
+            ) : (
+              <>
+                <button className="btn-life" onClick={download}>
+                  Download certificate
+                </button>
+                <a className="btn-ghost" href={assetUrl(`/api/runs/${cert.run}/patch`)} target="_blank" rel="noreferrer">
+                  View patch
+                </a>
+                {preview && (
+                  <a className="btn-ghost" href={preview} target="_blank" rel="noreferrer">
+                    Open the app
+                  </a>
+                )}
+              </>
             )}
           </div>
+          {hosted && showPatch && <pre className="card-patch">{hosted.text(`/api/runs/${cert.run}/patch`)}</pre>}
         </div>
       </aside>
       <button ref={closeRef} className="rez-close" onClick={onClose} aria-label="Back to the resurrection map">

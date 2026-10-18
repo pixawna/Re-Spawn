@@ -219,6 +219,16 @@ Tools: `find_blockers`, `get_migration_options`, `resolve_prerequisites`, `rank_
 
 ---
 
+## Hosted demo (replay)
+
+There is a one-file hosted demo that runs this exact UI against recordings of real runs, one per graph-rule setting, so the rule toggles show their real outcomes. It cannot clone new repos.
+
+```bash
+npm run api                                   # backend running
+python3 scripts/record-runs.py                # writes recordings.json from three real runs
+npm i --no-save esbuild && node scripts/build-replay.mjs recordings.json out/respawn-demo.html
+```
+
 ## Checks
 
 ```bash

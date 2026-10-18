@@ -102,7 +102,27 @@ export type Rules = {
 
 export type RunEvent = { seq: number; type: string; t: number; [k: string]: unknown };
 
+// Hosted demo mode: a page can install window.__RESPAWN_REPLAY__ to serve recorded runs instead of a live backend.
+type Replay = {
+  fetch: (path: string, init?: RequestInit) => Promise<unknown>;
+  EventSource: typeof EventSource;
+  asset: (path: string) => string;
+  text: (path: string) => string;
+};
+
+export function replay(): Replay | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { __RESPAWN_REPLAY__?: Replay }).__RESPAWN_REPLAY__ ?? null;
+}
+
+export function assetUrl(path: string) {
+  const r = replay();
+  return r ? r.asset(path) : API + path;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = replay();
+  if (r) return (await r.fetch(path, init)) as T;
   const res = await fetch(API + path, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },

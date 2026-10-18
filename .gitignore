@@ -45,3 +45,6 @@ __pycache__/
 *.pyc
 .venv/
 backend/.respawn/
+.replay-*/
+recordings.json
+out/
