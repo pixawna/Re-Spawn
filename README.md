@@ -321,3 +321,28 @@ npm run build
 References: [FalkorDB shortest paths](https://docs.falkordb.com/algorithms/sppath), [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk), [Claude tool definitions](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools).
 
 These feature additions were implemented with OpenAI Codex assistance. Live Anthropic responses and GitHub publication require local credentials; test doubles are not evidence of live provider behavior.
+
+
+## Resurrection reports and Learn mode
+
+Open a project’s map and choose **Resurrection report**. The report contains the original error and why-chain, a controller-attributed tool timeline, every recorded planning round and exclusion fact, new learning and observed reuse, the actual patch, verification limits, and Cypher evidence. It also supports failed and incomplete runs: missing proof is shown explicitly. Use **Export Markdown** or **Export HTML** to save it for the submission or video.
+
+Completed reports are saved in `RESPAWN_DATA/reports`. **Past reports** opens their archive, including after the API restarts. Reports saved by this version are durable; old in-memory runs from before this feature are not reconstructed. Previews and live event streams retain their existing in-memory lifetime. Reuse links are based on recorded events from this session and saved reports, not an invented graph-wide count. No API key is needed to generate a report.
+
+Report API:
+
+- `GET /api/runs/{run}/report`: structured JSON.
+- `GET /api/runs/{run}/report?format=markdown`: downloadable Markdown.
+- `GET /api/runs/{run}/report?format=html`: standalone, escaped HTML.
+- `GET /api/projects/{project}/reports`: current and archived report summaries.
+
+**Learn mode** is an optional playable graveyard. Move Mori with arrow keys/WASD, adjacent tiles, or touch buttons; gravestones block movement. Five memory runes teach the selected project’s cause, route, prerequisites, shared memory, and verification. Correct answers earn 20 XP each; all five complete training. Wrong answers offer a hint, restarting clears the training score, and **Read all field notes** exposes every fact at zero points. The game reads a project graph snapshot and never repairs a repository or writes graph facts. **Explore the real graph** is always available. Missing evidence is identified instead of replaced with a fabricated example. Training progress resets when the game closes.
+
+Additional checks (game test runner requires Node 22.6+):
+
+```sh
+RESPAWN_TEST_GRAPH=1 .venv/bin/python -m pytest tests -q
+node --experimental-strip-types --test scripts/test-learn-game.mjs
+npm run lint
+npm run build
+```

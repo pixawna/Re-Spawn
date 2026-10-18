@@ -7,6 +7,7 @@ change a relationship in FalkorDB and the chosen plan changes with it.
 from __future__ import annotations
 
 import json
+import logging
 import asyncio
 import os
 import re
@@ -178,6 +179,16 @@ def _safe_loop(run: Run) -> None:
         run.emit("done", status="error")
     finally:
         client.reset_listener(token)
+        if run.status not in ("running", "awaiting_approval"):
+            try:
+                from .. import reports
+
+                reports.save(run, DATA / "reports", list(RUNS.values()))
+            except Exception:
+                # Report storage must never change the verified recovery outcome.
+                logging.getLogger(__name__).exception(
+                    "Could not persist resurrection report %s", run.id
+                )
 
 
 def _short(params: dict) -> dict:

@@ -7,6 +7,9 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import ReportArchive from "./ReportArchive";
+import RunReport from "./RunReport";
+import LearnGame from "./LearnGame";
 import GraveyardScene from "./GraveyardScene";
 import ResurrectionMap from "./ResurrectionMap";
 import Journal from "./Journal";
@@ -62,6 +65,10 @@ function recipeText(op: Record<string, string>) {
 }
 
 export default function ReSpawn() {
+  const [reportRunId, setReportRunId] = useState<string | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [learnProject, setLearnProject] = useState<Project | null>(null);
   const [agentMode, setAgentMode] = useState("auto");
   const [chain, setChain] = useState<WhyChain | null>(null);
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
@@ -391,6 +398,18 @@ export default function ReSpawn() {
                   ? `FalkorDB ${health.graph.mode} · ${Object.values(health.stats).reduce((a, b) => a + b, 0)} nodes`
                   : "Connecting to FalkorDB"}
           </div>
+          {view === "graveyard" && projects.length > 0 && (
+            <button
+              className="learn-entry btn-ghost"
+              onClick={() =>
+                setLearnProject(
+                  projects.find((p) => p.id === selected) ?? projects[0],
+                )
+              }
+            >
+              ◇ Learn mode · play as Mori
+            </button>
+          )}
           {view === "graveyard" && (
             <form className="dig" onSubmit={dig}>
               <Pixel sprite={shovel} scale={4} className="dig-shovel" />
@@ -474,6 +493,33 @@ export default function ReSpawn() {
                         </option>
                       </select>
                     </label>
+                  )}
+                  <button
+                    className="btn-ghost"
+                    onClick={() => setLearnProject(project)}
+                  >
+                    ◇ Learn mode
+                  </button>
+                  {!replay() && (
+                    <button
+                      className="btn-ghost"
+                      onClick={() => {
+                        if (runId) {
+                          setReportRunId(runId);
+                          setShowReport(true);
+                        } else setShowArchive(true);
+                      }}
+                    >
+                      Resurrection report
+                    </button>
+                  )}
+                  {!replay() && (
+                    <button
+                      className="j-link"
+                      onClick={() => setShowArchive(true)}
+                    >
+                      Past reports
+                    </button>
                   )}
                   {cert && !running && (
                     <button
@@ -642,8 +688,46 @@ export default function ReSpawn() {
           )}
         </section>
       </div>
+      {showReport && reportRunId && (
+        <RunReport
+          key={reportRunId}
+          runId={reportRunId}
+          onClose={() => setShowReport(false)}
+        />
+      )}
+      {showArchive && project && (
+        <ReportArchive
+          key={project.id}
+          projectId={project.id}
+          onClose={() => setShowArchive(false)}
+          onSelect={(id) => {
+            setReportRunId(id);
+            setShowArchive(false);
+            setShowReport(true);
+          }}
+        />
+      )}
+      {learnProject && (
+        <LearnGame
+          key={learnProject.id}
+          project={learnProject}
+          onClose={() => setLearnProject(null)}
+          onExplore={() => {
+            open(learnProject.id);
+            setLearnProject(null);
+          }}
+        />
+      )}
       {showCert && cert && (
-        <Resurrection cert={cert} onClose={() => setShowCert(false)} />
+        <Resurrection
+          cert={cert}
+          onClose={() => setShowCert(false)}
+          onReport={() => {
+            setShowCert(false);
+            setReportRunId(runId);
+            setShowReport(true);
+          }}
+        />
       )}
       {runId && (
         <span className="sr-only" aria-live="polite">

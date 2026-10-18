@@ -15,14 +15,19 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    PlainTextResponse,
+    StreamingResponse,
+    Response,
+)
 from pydantic import BaseModel
 
 from .config import agent_config
 from .agent import orchestrator as orch
 from .graph import client, queries as Q, schema, seeds, planner, dependencies
 from .graph.ask import ask
-from . import pull_requests
+from . import pull_requests, reports
 
 EXAMPLE_PROJECTS = [
     {
@@ -420,3 +425,65 @@ def pull_request(rid: str):
         return pull_requests.create(run, project, orch.project_dir(project))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/runs/{rid}/report")
+def resurrection_report(rid: str, format: Literal["json", "markdown", "html"] = "json"):
+    run = orch.RUNS.get(rid)
+    report = (
+        reports.build(run, list(orch.RUNS.values()))
+        if run
+        else reports.load(rid, orch.DATA / "reports")
+    )
+    if not report:
+        raise HTTPException(404, "No report for this run")
+    if format == "json":
+        return report
+    content = (
+        reports.markdown(report)
+        if format == "markdown"
+        else reports.html_document(report)
+    )
+    suffix = "md" if format == "markdown" else "html"
+    # run IDs, rather than repository names, keep attachment filenames safe.
+    filename = (
+        report["run"]
+        if re.fullmatch(r"run-[a-f0-9]{8}", report["run"])
+        else "resurrection"
+    )
+    return Response(
+        content,
+        media_type="text/markdown" if format == "markdown" else "text/html",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}-report.{suffix}"',
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        },
+    )
+
+
+@app.get("/api/projects/{pid}/reports")
+def report_archive(pid: str):
+    found = {}
+    directory = orch.DATA / "reports"
+    if directory.exists():
+        for path in sorted(
+            directory.glob("run-*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        ):
+            if path.is_symlink():
+                continue
+            try:
+                report = reports.load(path.stem, directory)
+                if report and report.get("project") == pid:
+                    found[report["run"]] = {
+                        "id": report["run"],
+                        **report["summary"],
+                        "archived": True,
+                    }
+            except (OSError, ValueError, KeyError):
+                continue
+    for run in list(orch.RUNS.values()):
+        if run.project_id == pid:
+            summary = reports.build(run)["summary"]
+            found[run.id] = {"id": run.id, **summary, "archived": False}
+    return list(found.values())

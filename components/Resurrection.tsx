@@ -54,9 +54,11 @@ function certificateSvg(c: Certificate) {
 export default function Resurrection({
   cert,
   onClose,
+  onReport,
 }: {
   cert: Certificate;
   onClose: () => void;
+  onReport: () => void;
 }) {
   const hosted = replay();
   const [prState, setPrState] = useState("");
@@ -257,6 +259,9 @@ export default function Resurrection({
               </button>
             ) : (
               <>
+                <button className="btn-ghost" onClick={onReport}>
+                  Read resurrection report
+                </button>
                 <button className="btn-life" onClick={download}>
                   Download certificate
                 </button>
